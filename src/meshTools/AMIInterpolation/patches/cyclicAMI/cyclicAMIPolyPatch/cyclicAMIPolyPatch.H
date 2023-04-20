@@ -467,7 +467,7 @@ public:
                 ) const;
 
                 //- Transform a patch-based direction from this side to
-                //  nbr side
+                //- nbr side
                 virtual void reverseTransformDirection
                 (
                     vector& d,
@@ -476,6 +476,14 @@ public:
 
 
             // Interpolations
+
+                template<class Type, class CombineOp>
+                void interpolate3
+                (
+                    const Field<Type>& fld,
+                    Field<Type>& result,
+                    const CombineOp& cop
+                ) const;
 
                 //- Interpolate field
                 template<class Type>

@@ -31,6 +31,292 @@ License
 
 // * * * * * * * * * * * * * Private Member Functions  * * * * * * * * * * * //
 
+namespace Foam
+{
+namespace AMI
+{
+template<class T>
+class MultiplyWeightOp
+{
+public:
+
+    MultiplyWeightOp()
+    {}
+
+    void operator()
+    (
+        T& x,
+        const UList<T>& values,
+        const UList<label>& faces,
+        const UList<scalar>& weights,
+        const scalar /* unused sumWeight */
+    ) const
+    {
+        x = Zero;
+        forAll(faces, i)
+        {
+            const label facei = faces[i];
+            const scalar w = weights[i];
+
+            x += w*values[facei];
+        }
+    }
+};
+
+
+template<class T>
+class StabiliseWeightOp
+:
+    public MultiplyWeightOp<T>
+{
+public:
+
+    StabiliseWeightOp()
+    {}
+
+    void operator()
+    (
+        T& x,
+        const UList<T>& values,
+        const UList<label>& faces,
+        const UList<scalar>& weights,
+        const scalar sumWeight
+    ) const
+    {
+        const T corr = (1 - sumWeight)*x;
+
+        MultiplyWeightOp<T>::operator()(x, values, faces, weights, sumWeight);
+
+        x += corr;
+    }
+};
+
+
+template<class T>
+class NormaliseWeightOp
+:
+    public MultiplyWeightOp<T>
+{
+public:
+
+    NormaliseWeightOp()
+    {}
+
+    void operator()
+    (
+        T& x,
+        const UList<T>& values,
+        const UList<label>& faces,
+        const UList<scalar>& weights,
+        const scalar sumWeight
+    ) const
+    {
+        MultiplyWeightOp<T>::operator()(x, values, faces, weights, sumWeight);
+
+        x /= sumWeight;
+    }
+};
+
+
+template<class T>
+class AverageOp
+:
+    public MultiplyWeightOp<T>
+{
+public:
+
+    AverageOp()
+    {}
+
+    void operator()
+    (
+        T& x,
+        const UList<T>& values,
+        const UList<label>& faces,
+        const UList<scalar>& weights,
+        const scalar sumWeight
+    ) const
+    {
+        const T xOld = x;
+
+        MultiplyWeightOp<T>::operator()(x, values, faces, weights, sumWeight);
+
+        x = 0.5*(x + xOld);
+    }
+};
+
+
+template<class T, class Cop>
+class CombineOp
+{
+    // Combine operator, e.g.minOp, maxOp
+    Cop cop_;
+
+
+public:
+
+    CombineOp(const Cop& cop)
+    :
+        cop_(cop)
+    {}
+
+    void operator()
+    (
+        T& x,
+        const UList<T>& values,
+        const UList<label>& faces,
+        const UList<scalar>&, /* unused weights */
+        const scalar /* unused sumWeight */
+    ) const
+    {
+        x = values[faces[0]];
+        for (label facei=1; facei<faces.size(); ++facei)
+        {
+            cop_(x, values[facei]);
+        }
+    }
+};
+
+} // End namespace AMI
+} // End namespace Foam
+
+
+// * * * * * * * * * * * * * Private Member Functions  * * * * * * * * * * * //
+
+template<class Type, class CombineOp>
+void Foam::AMIInterpolation::interpolateToSource3
+(
+    const UList<Type>& tgtFld,
+    List<Type>& srcFld,
+    const CombineOp& cop
+) const
+{
+    addProfiling(ami, "AMIInterpolation::interpolateToSource3");
+
+    if (tgtFld.size() != tgtAddress_.size())
+    {
+        FatalErrorInFunction
+            << "Target field size is not equal to target patch size" << nl
+            << "    target patch   = " << tgtAddress_.size() << nl
+            << "    supplied field = " << tgtFld.size()
+            << abort(FatalError);
+    }
+
+    if (srcFld.size() != srcAddress_.size())
+    {
+        FatalErrorInFunction
+            << "Source field size is not equal to source patch size" << nl
+            << "    source patch   = " << srcAddress_.size() << nl
+            << "    supplied field = " << srcFld.size()
+            << abort(FatalError);
+    }
+
+    if (distributed())
+    {
+        List<Type> work(tgtFld);
+        tgtMapPtr_->distribute(work);
+
+        forAll(srcFld, facei)
+        {
+            if (srcWeightsSum_[facei] > lowWeightCorrection_)
+            {
+                const labelList& faces = srcAddress_[facei];
+                const scalarList& weights = srcWeights_[facei];
+
+                cop(srcFld[facei], work, faces, weights, srcWeightsSum_[facei]);
+            }
+        }
+    }
+    else
+    {
+        forAll(srcFld, facei)
+        {
+            if (srcWeightsSum_[facei] > lowWeightCorrection_)
+            {
+                const labelList& faces = srcAddress_[facei];
+                const scalarList& weights = srcWeights_[facei];
+
+                cop
+                (
+                    srcFld[facei],
+                    tgtFld,
+                    faces,
+                    weights,
+                    srcWeightsSum_[facei]
+                );
+            }
+        }
+    }
+}
+
+
+template<class Type, class CombineOp>
+void Foam::AMIInterpolation::interpolateToTarget3
+(
+    const UList<Type>& srcFld,
+    List<Type>& tgtFld,
+    const CombineOp& cop
+) const
+{
+    addProfiling(ami, "AMIInterpolation::interpolateToTarget3");
+
+    if (srcFld.size() != srcAddress_.size())
+    {
+        FatalErrorInFunction
+            << "Source field size is not equal to source patch size" << nl
+            << "    source patch   = " << srcAddress_.size() << nl
+            << "    supplied field = " << srcFld.size()
+            << abort(FatalError);
+    }
+
+    if (tgtFld.size() != tgtAddress_.size())
+    {
+        FatalErrorInFunction
+            << "Target field size is not equal to target patch size" << nl
+            << "    target patch   = " << tgtAddress_.size() << nl
+            << "    supplied field = " << tgtFld.size()
+            << abort(FatalError);
+    }
+
+    if (distributed())
+    {
+        List<Type> work(srcFld);
+        srcMapPtr_->distribute(work);
+
+        forAll(tgtFld, facei)
+        {
+            if (tgtWeightsSum_[facei] > lowWeightCorrection_)
+            {
+                const labelList& faces = tgtAddress_[facei];
+                const scalarList& weights = tgtWeights_[facei];
+
+                cop(tgtFld[facei], work, faces, weights, tgtWeightsSum_[facei]);
+            }
+        }
+    }
+    else
+    {
+        forAll(tgtFld, facei)
+        {
+            if (tgtWeightsSum_[facei] > lowWeightCorrection_)
+            {
+                const labelList& faces = tgtAddress_[facei];
+                const scalarList& weights = tgtWeights_[facei];
+
+                cop
+                (
+                    tgtFld[facei],
+                    srcFld,
+                    faces,
+                    weights,
+                    tgtWeightsSum_[facei]
+                );
+            }
+        }
+    }
+}
+
+
 template<class Type, class CombineOp>
 void Foam::AMIInterpolation::interpolateToTarget
 (

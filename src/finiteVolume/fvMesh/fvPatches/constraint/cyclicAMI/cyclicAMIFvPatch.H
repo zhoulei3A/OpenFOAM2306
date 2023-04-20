@@ -212,6 +212,17 @@ public:
             //- Return delta (P to N) vectors across coupled patch
             virtual tmp<vectorField> delta() const;
 
+            template<class Type, class CombineOp>
+            void interpolate3
+            (
+                const Field<Type>& fld,
+                Field<Type>& result,
+                const CombineOp& cop
+            ) const
+            {
+                cyclicAMIPolyPatch_.interpolate3(fld, result, cop);
+            }
+
             template<class Type>
             tmp<Field<Type>> interpolate
             (
@@ -258,7 +269,6 @@ public:
                 const Pstream::commsTypes commsType,
                 const labelUList& internalData
             ) const;
-
 };
 
 

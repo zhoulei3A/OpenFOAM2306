@@ -46,6 +46,35 @@ Foam::tmp<Foam::Field<Type>> Foam::cyclicAMIPolyPatch::interpolateUntransformed
 }
 
 
+template<class Type, class CombineOp>
+void Foam::cyclicAMIPolyPatch::interpolate3
+(
+    const Field<Type>& fld,
+    Field<Type>& result,
+    const CombineOp& cop
+) const
+{
+    if (owner())
+    {
+        AMI().interpolateToSource3
+        (
+            fld, // tgt
+            result,
+            cop
+        );
+    }
+    else
+    {
+        neighbPatch().AMI().interpolateToTarget3
+        (
+            fld, // src
+            result,
+            cop
+        );
+    }
+}
+
+
 template<class Type>
 Foam::tmp<Foam::Field<Type>> Foam::cyclicAMIPolyPatch::interpolate
 (

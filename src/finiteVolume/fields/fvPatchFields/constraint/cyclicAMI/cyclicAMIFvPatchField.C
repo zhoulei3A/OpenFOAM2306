@@ -148,31 +148,27 @@ Foam::cyclicAMIFvPatchField<Type>::patchNeighbourField() const
 {
     const Field<Type>& iField = this->primitiveField();
 
-    // By pass polyPatch to get nbrId. Instead use cyclicAMIFvPatch virtual
+    // Bypass polyPatch to get nbrId. Instead use cyclicAMIFvPatch virtual
     // neighbPatch()
     const cyclicAMIFvPatch& neighbPatch = cyclicAMIPatch_.neighbPatch();
     const labelUList& nbrFaceCells = neighbPatch.faceCells();
 
     Field<Type> pnf(iField, nbrFaceCells);
+    auto tpif = tmp<Field<Type>>::New(iField, cyclicAMIPatch_.faceCells());
 
-    tmp<Field<Type>> tpnf;
-    if (cyclicAMIPatch_.applyLowWeightCorrection())
-    {
-        Field<Type> pnfInternal(iField, cyclicAMIPatch_.faceCells());
-
-        tpnf = cyclicAMIPatch_.interpolate(pnf, pnfInternal);
-    }
-    else
-    {
-        tpnf = cyclicAMIPatch_.interpolate(pnf);
-    }
+    cyclicAMIPatch_.interpolate3
+    (
+        pnf,
+        tpif.ref(), // OUT
+        AMI::StabiliseWeightOp<Type>()
+    );
 
     if (doTransform())
     {
-        transform(tpnf.ref(), forwardT(), tpnf());
+        transform(tpif.ref(), forwardT(), tpif());
     }
 
-    return tpnf;
+    return tpif;
 }
 
 
@@ -211,23 +207,21 @@ void Foam::cyclicAMIFvPatchField<Type>::updateInterfaceMatrix
 
     solveScalarField pnf(psiInternal, nbrFaceCells);
 
-    const labelUList& faceCells = lduAddr.patchAddr(patchId);
-
     // Transform according to the transformation tensors
     transformCoupleField(pnf, cmpt);
 
-    if (cyclicAMIPatch_.applyLowWeightCorrection())
-    {
-        solveScalarField pif(psiInternal, faceCells);
-        pnf = cyclicAMIPatch_.interpolate(pnf, pif);
-    }
-    else
-    {
-        pnf = cyclicAMIPatch_.interpolate(pnf);
-    }
+    const labelUList& faceCells = lduAddr.patchAddr(patchId);
+    solveScalarField pif(psiInternal, faceCells);
+
+    cyclicAMIPatch_.interpolate3
+    (
+        pnf,
+        pif,  // OUT
+        AMI::StabiliseWeightOp<solveScalar>()
+    );
 
     // Multiply the field by coefficients and add into the result
-    this->addToInternalField(result, !add, faceCells, coeffs, pnf);
+    this->addToInternalField(result, !add, faceCells, coeffs, pif);
 }
 
 
@@ -251,20 +245,19 @@ void Foam::cyclicAMIFvPatchField<Type>::updateInterfaceMatrix
     // Transform according to the transformation tensors
     transformCoupleField(pnf);
 
-    if (cyclicAMIPatch_.applyLowWeightCorrection())
-    {
-        Field<Type> pif(psiInternal, cyclicAMIPatch_.faceCells());
-        pnf = cyclicAMIPatch_.interpolate(pnf, pif);
-    }
-    else
-    {
-        pnf = cyclicAMIPatch_.interpolate(pnf);
-    }
-
     const labelUList& faceCells = lduAddr.patchAddr(patchId);
+    Field<Type> pif(psiInternal, faceCells);
+
+    cyclicAMIPatch_.interpolate3
+    (
+        pnf,
+        pif,  // OUT
+        AMI::StabiliseWeightOp<Type>()
+    );
+
 
     // Multiply the field by coefficients and add into the result
-    this->addToInternalField(result, !add, faceCells, coeffs, pnf);
+    this->addToInternalField(result, !add, faceCells, coeffs, pif);
 }
 
 
@@ -445,4 +438,3 @@ void Foam::cyclicAMIFvPatchField<Type>::write(Ostream& os) const
 
 
 // ************************************************************************* //
-

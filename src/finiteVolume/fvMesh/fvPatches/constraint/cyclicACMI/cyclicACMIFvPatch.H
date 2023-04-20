@@ -186,6 +186,25 @@ public:
             //- Return delta (P to N) vectors across coupled patch
             virtual tmp<vectorField> delta() const;
 
+            template<class Type, class CombineOp>
+            void interpolate3
+            (
+                const Field<Type>& fld,
+                Field<Type>& result,
+                const CombineOp& cop
+            ) const
+            {
+                // Make sure areas are up-to-date
+                updateAreas();
+
+                cyclicACMIPolyPatch_.cyclicAMIPolyPatch::interpolate3
+                (
+                    fld,
+                    result,
+                    cop
+                );
+            }
+
             //- Interpolate (make sure to have uptodate areas)
             template<class Type>
             tmp<Field<Type>> interpolate

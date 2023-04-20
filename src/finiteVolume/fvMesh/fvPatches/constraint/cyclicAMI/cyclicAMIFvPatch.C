@@ -97,23 +97,18 @@ void Foam::cyclicAMIFvPatch::makeWeights(scalarField& w) const
     {
         const cyclicAMIFvPatch& nbrPatch = neighbFvPatch();
 
+        // Coupled patch: delta = Cf - Cn
+
         const scalarField deltas(nf() & coupledFvPatch::delta());
 
-        tmp<scalarField> tnbrDeltas;
-        if (applyLowWeightCorrection())
-        {
-            tnbrDeltas =
-                interpolate
-                (
-                    nbrPatch.nf() & nbrPatch.coupledFvPatch::delta(),
-                    scalarField(this->size(), 1.0)
-                );
-        }
-        else
-        {
-            tnbrDeltas =
-                interpolate(nbrPatch.nf() & nbrPatch.coupledFvPatch::delta());
-        }
+        auto tnbrDeltas = tmp<scalarField>::New(deltas.size(), scalar(1));
+
+        interpolate3
+        (
+            (nbrPatch.nf() & nbrPatch.coupledFvPatch::delta())(),
+            tnbrDeltas.ref(),
+            AMI::NormaliseWeightOp<scalar>()
+         );
 
         const scalarField& nbrDeltas = tnbrDeltas();
 
@@ -160,22 +155,18 @@ Foam::tmp<Foam::vectorField> Foam::cyclicAMIFvPatch::delta() const
 
     if (coupled())
     {
+        // Coupled patch: delta = Cf - Cn
+
         const vectorField patchD(coupledFvPatch::delta());
 
-        tmp<vectorField> tnbrPatchD;
-        if (applyLowWeightCorrection())
-        {
-            tnbrPatchD =
-                interpolate
-                (
-                    nbrPatch.coupledFvPatch::delta(),
-                    vectorField(this->size(), Zero)
-                );
-        }
-        else
-        {
-            tnbrPatchD = interpolate(nbrPatch.coupledFvPatch::delta());
-        }
+        auto tnbrPatchD = tmp<vectorField>::New(this->size(), Zero);
+
+        interpolate3
+        (
+            nbrPatch.coupledFvPatch::delta()(),
+            tnbrPatchD.ref(),
+            AMI::NormaliseWeightOp<vector>()
+         );
 
         const vectorField& nbrPatchD = tnbrPatchD();
 
@@ -264,7 +255,7 @@ void Foam::cyclicAMIFvPatch::movePoints()
     const_cast<scalarField&>(nbr.magSf()) = mag(nbr.Sf());
 
 
-    // Set consitent mesh motion flux
+    // Set consistent mesh motion flux
     // TODO: currently maps src mesh flux to tgt - update to
     // src = src + mapped(tgt) and tgt = tgt + mapped(src)?
 

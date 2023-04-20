@@ -374,7 +374,7 @@ public:
             //- Access to the requireMatch flag
             inline bool setRequireMatch(const bool flag);
 
-            //- Return true if requireMatch and lowWeightCorrectionin active
+            //- Return true if requireMatch and lowWeightCorrection is active
             inline bool mustMatchFaces() const;
 
             //- Access to the reverseTarget flag
@@ -512,6 +512,14 @@ public:
                     const UList<Type>& defaultValues = UList<Type>::null()
                 ) const;
 
+                template<class Type, class CombineOp>
+                void interpolateToSource3
+                (
+                    const UList<Type>& tgtFld,
+                    List<Type>& srcFld,
+                    const CombineOp& cop
+                ) const;
+
                 //- Interpolate from source to target with supplied op
                 //- to combine existing value with remote value and weight
                 template<class Type, class CombineOp>
@@ -521,6 +529,14 @@ public:
                     const CombineOp& cop,
                     List<Type>& result,
                     const UList<Type>& defaultValues = UList<Type>::null()
+                ) const;
+
+                template<class Type, class CombineOp>
+                void interpolateToTarget3
+                (
+                    const UList<Type>& srcFld,
+                    List<Type>& tgtFld,
+                    const CombineOp& cop
                 ) const;
 
 
