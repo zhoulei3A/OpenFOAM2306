@@ -84,7 +84,9 @@ void Foam::fanFvPatchField<Foam::scalar>::calcFanJump()
 
         if (phip.internalField().dimensions() == dimMass/dimTime)
         {
-            Un /= patch().lookupPatchField<volScalarField>(rhoName_);
+            const auto& rho =
+                patch().lookupPatchField<volScalarField>(rhoName_);
+            Un /= max(rho, SMALL);
         }
 
         if (nonDimensional_)
