@@ -782,7 +782,8 @@ bool Foam::faceAreaWeightAMI::calculate
     }
 
     // Convert the weights from areas to normalised values
-    normaliseWeights(requireMatch_, true);
+    const bool verbose = true;
+    normaliseWeights(verbose);
 
     nonConformalCorrection();
 

@@ -161,8 +161,7 @@ void Foam::AMIInterpolation::normaliseWeights
     const labelListList& addr,
     scalarListList& wght,
     scalarField& wghtSum,
-    const bool conformal,
-    const bool output,
+    const bool verbose,
     const scalar lowWeightTol
 )
 {
@@ -182,14 +181,10 @@ void Foam::AMIInterpolation::normaliseWeights
 
             scalar s = sum(w);
             scalar t = s/denom;
-            if (conformal)
-            {
-                denom = s;
-            }
 
-            forAll(w, i)
+            for (auto& wi : w)
             {
-                w[i] /= denom;
+                wi /= denom;
             }
 
             wghtSum[facei] = t;
@@ -204,7 +199,7 @@ void Foam::AMIInterpolation::normaliseWeights
         }
     }
 
-    if (output)
+    if (verbose)
     {
         if (returnReduceOr(wght.size()))
         {
@@ -525,7 +520,6 @@ void Foam::AMIInterpolation::agglomerate
         srcAddress,
         srcWeights,
         srcWeightsSum,
-        true,
         false,
         -1
     );
@@ -1002,11 +996,7 @@ void Foam::AMIInterpolation::append
 }
 
 
-void Foam::AMIInterpolation::normaliseWeights
-(
-    const bool conformal,
-    const bool output
-)
+void Foam::AMIInterpolation::normaliseWeights(const bool verbose)
 {
     normaliseWeights
     (
@@ -1015,8 +1005,7 @@ void Foam::AMIInterpolation::normaliseWeights
         srcAddress_,
         srcWeights_,
         srcWeightsSum_,
-        conformal,
-        output,
+        verbose,
         lowWeightCorrection_
     );
 
@@ -1027,8 +1016,7 @@ void Foam::AMIInterpolation::normaliseWeights
         tgtAddress_,
         tgtWeights_,
         tgtWeightsSum_,
-        conformal,
-        output,
+        verbose,
         lowWeightCorrection_
     );
 }

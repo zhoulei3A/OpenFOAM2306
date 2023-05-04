@@ -221,8 +221,7 @@ protected:
                 const labelListList& addr,
                 scalarListList& wght,
                 scalarField& wghtSum,
-                const bool conformal,
-                const bool output,
+                const bool verbose,
                 const scalar lowWeightTol
             );
 
@@ -494,7 +493,7 @@ public:
             );
 
             //- Normalise the weights
-            void normaliseWeights(const bool conformal, const bool output);
+            void normaliseWeights(const bool verbose);
 
 
         // Evaluation
