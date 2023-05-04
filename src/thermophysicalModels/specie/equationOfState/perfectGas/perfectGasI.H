@@ -75,7 +75,7 @@ inline Foam::autoPtr<Foam::perfectGas<Specie>> Foam::perfectGas<Specie>::New
 template<class Specie>
 inline Foam::scalar Foam::perfectGas<Specie>::rho(scalar p, scalar T) const
 {
-    return p/(this->R()*T);
+    return p/(this->R()*max(1.0, T));
 }
 
 
@@ -117,7 +117,7 @@ inline Foam::scalar Foam::perfectGas<Specie>::S(scalar p, scalar T) const
 template<class Specie>
 inline Foam::scalar Foam::perfectGas<Specie>::psi(scalar p, scalar T) const
 {
-    return 1.0/(this->R()*T);
+    return 1.0/(this->R()*max(1.0, T));
 }
 
 
