@@ -435,6 +435,22 @@ Foam::KinematicCloud<CloudType>::cellLengthScale() const
 
 
 template<class CloudType>
+inline Foam::DimensionedField<Foam::scalar, Foam::volMesh>&
+Foam::KinematicCloud<CloudType>::rhokTrans()
+{
+    return *rhokTrans_;
+}
+
+
+template<class CloudType>
+inline const Foam::DimensionedField<Foam::scalar, Foam::volMesh>&
+Foam::KinematicCloud<CloudType>::rhokTrans() const
+{
+    return *rhokTrans_;
+}
+
+
+template<class CloudType>
 inline Foam::DimensionedField<Foam::vector, Foam::volMesh>&
 Foam::KinematicCloud<CloudType>::UTrans()
 {
@@ -463,6 +479,45 @@ inline const Foam::DimensionedField<Foam::scalar, Foam::volMesh>&
 Foam::KinematicCloud<CloudType>::UCoeff() const
 {
     return *UCoeff_;
+}
+
+
+template<class CloudType>
+inline Foam::tmp<Foam::volScalarField::Internal>
+Foam::KinematicCloud<CloudType>::Srhok() const
+{
+    label debug0 = debug;
+    debug = 1;
+    if (debug)
+    {
+        Pout<< "rhokTrans min/max = " << min(rhokTrans()).value() << ", "
+            << max(rhokTrans()).value() << endl;
+    }
+    debug = debug0;
+
+    if (this->solution().coupled())
+    {
+        return rhokTrans()/this->db().time().deltaT()/this->mesh().V();
+    }
+
+    return
+        tmp<volScalarField::Internal>::New
+        (
+            IOobject
+            (
+                this->name() + ":rhokTrans",
+                this->db().time().timeName(),
+                this->db(),
+                IOobject::NO_READ,
+                IOobject::NO_WRITE,
+                IOobject::NO_REGISTER
+            ),
+            this->mesh(),
+            dimensionedScalar
+            (
+                rhokTrans().dimensions()/dimTime/dimVolume, Zero
+            )
+        );
 }
 
 

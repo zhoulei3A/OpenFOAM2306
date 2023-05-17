@@ -428,6 +428,22 @@ Foam::KinematicCloud<CloudType>::KinematicCloud
     isotropyModel_(nullptr),
 
     UIntegrator_(nullptr),
+    rhokTrans_
+    (
+        new volScalarField::Internal
+        (
+            IOobject
+            (
+                this->name() + ":rhokTrans",
+                this->db().time().timeName(),
+                this->db(),
+                IOobject::READ_IF_PRESENT,
+                IOobject::AUTO_WRITE
+            ),
+            mesh_,
+            dimensionedScalar(dimMass, Zero)
+        )
+    ),
     UTrans_
     (
         new volVectorField::Internal
@@ -517,6 +533,22 @@ Foam::KinematicCloud<CloudType>::KinematicCloud
     isotropyModel_(c.isotropyModel_->clone()),
 
     UIntegrator_(c.UIntegrator_->clone()),
+    rhokTrans_
+    (
+        new volScalarField::Internal
+        (
+            IOobject
+            (
+                this->name() + ":rhokTrans",
+                this->db().time().timeName(),
+                this->db(),
+                IOobject::NO_READ,
+                IOobject::NO_WRITE,
+                IOobject::NO_REGISTER
+            ),
+            c.rhokTrans_()
+        )
+    ),
     UTrans_
     (
         new volVectorField::Internal
@@ -614,6 +646,7 @@ Foam::KinematicCloud<CloudType>::KinematicCloud
     isotropyModel_(nullptr),
 
     UIntegrator_(nullptr),
+    rhokTrans_(nullptr),
     UTrans_(nullptr),
     UCoeff_(nullptr),
     log(c.log)
@@ -687,8 +720,9 @@ void Foam::KinematicCloud<CloudType>::restoreState()
 template<class CloudType>
 void Foam::KinematicCloud<CloudType>::resetSourceTerms()
 {
+    rhokTrans().field() = Zero;
     UTrans().field() = Zero;
-    UCoeff().field() = 0.0;
+    UCoeff().field() = Zero;
 }
 
 
@@ -725,6 +759,7 @@ void Foam::KinematicCloud<CloudType>::relaxSources
     const KinematicCloud<CloudType>& cloudOldTime
 )
 {
+    this->relax(rhokTrans_(), cloudOldTime.rhokTrans(), "rhok");
     this->relax(UTrans_(), cloudOldTime.UTrans(), "U");
     this->relax(UCoeff_(), cloudOldTime.UCoeff(), "U");
 }
@@ -733,6 +768,7 @@ void Foam::KinematicCloud<CloudType>::relaxSources
 template<class CloudType>
 void Foam::KinematicCloud<CloudType>::scaleSources()
 {
+    this->scale(rhokTrans_(), "rhok");
     this->scale(UTrans_(), "U");
     this->scale(UCoeff_(), "U");
 }
