@@ -6,7 +6,7 @@
      \\/     M anipulation  |
 -------------------------------------------------------------------------------
     Copyright (C) 2011-2017 OpenFOAM Foundation
-    Copyright (C) 2020 OpenCFD Ltd.
+    Copyright (C) 2019 OpenCFD Ltd.
 -------------------------------------------------------------------------------
 License
     This file is part of OpenFOAM.
@@ -25,24 +25,23 @@ License
     along with OpenFOAM.  If not, see <http://www.gnu.org/licenses/>.
 
 Class
-    Foam::VoidFraction
+    Foam::PatchPostProcessing
 
 Group
     grpLagrangianIntermediateFunctionObjects
 
 Description
-    Creates particle void fraction field on carrier phase
+    Standard post-processing
 
 SourceFiles
-    VoidFraction.C
+    PatchPostProcessing.C
 
 \*---------------------------------------------------------------------------*/
 
-#ifndef VoidFraction_H
-#define VoidFraction_H
+#ifndef PatchPostProcessing_H
+#define PatchPostProcessing_H
 
 #include "CloudFunctionObject.H"
-#include "volFields.H"
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
@@ -50,24 +49,41 @@ namespace Foam
 {
 
 /*---------------------------------------------------------------------------*\
-                       Class VoidFraction Declaration
+                    Class PatchPostProcessing Declaration
 \*---------------------------------------------------------------------------*/
 
 template<class CloudType>
-class VoidFraction
+class PatchPostProcessing
 :
     public CloudFunctionObject<CloudType>
 {
-    // Private Data
+    // Private data
 
-        // Typedefs
+        typedef typename CloudType::particleType parcelType;
 
-            //- Convenience typedef for parcel type
-            typedef typename CloudType::parcelType parcelType;
+        //- Maximum number of parcels to store - set as a scalar for I/O
+        scalar maxStoredParcels_;
+
+        //- Field name filters
+        wordRes fields_;
+
+        //- List of patch indices to post-process
+        labelList patchIDs_;
+
+        //- List of time for each data record
+        List<DynamicList<scalar>> times_;
+
+        //- List of output data per patch
+        List<DynamicList<string>> patchData_;
+
+        //- Field header
+        string header_;
 
 
-        //- Void fraction field
-        autoPtr<volScalarField> thetaPtr_;
+    // Private Member Functions
+
+        //- Returns local patchi if patch is in patchIds_ list
+        label applyToPatch(const label globalPatchi) const;
 
 
 protected:
@@ -75,19 +91,19 @@ protected:
     // Protected Member Functions
 
         //- Write post-processing info
-        virtual void write();
+        void write();
 
 
 public:
 
     //- Runtime type information
-    TypeName("voidFraction");
+    TypeName("patchPostProcessing");
 
 
     // Constructors
 
         //- Construct from dictionary
-        VoidFraction
+        PatchPostProcessing
         (
             const dictionary& dict,
             CloudType& owner,
@@ -95,44 +111,40 @@ public:
         );
 
         //- Construct copy
-        VoidFraction(const VoidFraction<CloudType>& vf);
+        PatchPostProcessing(const PatchPostProcessing<CloudType>& ppm);
 
         //- Construct and return a clone
         virtual autoPtr<CloudFunctionObject<CloudType>> clone() const
         {
             return autoPtr<CloudFunctionObject<CloudType>>
             (
-                new VoidFraction<CloudType>(*this)
+                new PatchPostProcessing<CloudType>(*this)
             );
         }
 
 
     //- Destructor
-    virtual ~VoidFraction() = default;
+    virtual ~PatchPostProcessing() = default;
 
 
     // Member Functions
 
+        // Access
+
+            //- Return maximum number of parcels to store per patch
+            inline label maxStoredParcels() const;
+
+            //- Return const mapping from local to global patch ids
+            inline const labelList& patchIDs() const;
+
+
         // Evaluation
 
-            //- Pre-evolve hook
-            virtual void preEvolve
+            //- Post-patch hook
+            virtual bool postPatch
             (
-                const typename parcelType::trackingData& td
-            );
-
-            //- Post-evolve hook
-            virtual void postEvolve
-            (
-                const typename parcelType::trackingData& td
-            );
-
-            //- Post-move hook
-            virtual bool postMove
-            (
-                parcelType& p,
-                const scalar dt,
-                const point& position0,
+                const parcelType& p,
+                const polyPatch& pp,
                 const typename parcelType::trackingData& td
             );
 };
@@ -144,8 +156,12 @@ public:
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
+#include "PatchPostProcessingI.H"
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
 #ifdef NoRepository
-    #include "VoidFraction.C"
+    #include "PatchPostProcessing.C"
 #endif
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
