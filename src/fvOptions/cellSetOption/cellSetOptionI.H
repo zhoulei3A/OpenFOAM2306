@@ -6,7 +6,7 @@
      \\/     M anipulation  |
 -------------------------------------------------------------------------------
     Copyright (C) 2011-2015 OpenFOAM Foundation
-    Copyright (C) 2021 OpenCFD Ltd.
+    Copyright (C) 2021-2023 OpenCFD Ltd.
 -------------------------------------------------------------------------------
 License
     This file is part of OpenFOAM.
@@ -105,6 +105,12 @@ inline Foam::scalar Foam::fv::cellSetOption::duration(scalar val) noexcept
     scalar old(duration_);
     duration_ = val;
     return old;
+}
+
+
+inline bool Foam::fv::cellSetOption::isSelectionUpdated() const noexcept
+{
+    return updateSelection_;
 }
 
 

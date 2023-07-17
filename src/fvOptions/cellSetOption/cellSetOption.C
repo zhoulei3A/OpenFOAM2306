@@ -369,7 +369,8 @@ Foam::fv::cellSetOption::cellSetOption
     points_(),
     movingPoints_(),
     geometricSelection_(),
-    V_(0)
+    V_(0),
+    updateSelection_(false)
 {
     Info<< incrIndent;
     read(dict);
@@ -426,19 +427,30 @@ bool Foam::fv::cellSetOption::isActive()
 
 bool Foam::fv::cellSetOption::read(const dictionary& dict)
 {
-    if (fv::option::read(dict))
+    if (!fv::option::read(dict))
     {
-        timeStart_ = -1;
-
-        if (coeffs_.readIfPresent("timeStart", timeStart_))
-        {
-            coeffs_.readEntry("duration", duration_);
-        }
-
-        return true;
+        return false;
     }
 
-    return false;
+    timeStart_ = -1;
+
+    if (coeffs_.readIfPresent("timeStart", timeStart_))
+    {
+        coeffs_.readEntry("duration", duration_);
+    }
+
+    // Do not read and set selections unless users request
+    updateSelection_ = coeffs_.getOrDefault("updateSelection", false);
+
+    if (updateSelection_)
+    {
+        setSelection(coeffs_);
+        setCellSelection();
+        setCellSelection(mesh_.time().timeOutputValue());
+        setVol();
+    }
+
+    return true;
 }
 
 
