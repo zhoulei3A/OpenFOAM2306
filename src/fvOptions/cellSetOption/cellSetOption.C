@@ -6,7 +6,7 @@
      \\/     M anipulation  |
 -------------------------------------------------------------------------------
     Copyright (C) 2011-2016 OpenFOAM Foundation
-    Copyright (C) 2017-2022 OpenCFD Ltd.
+    Copyright (C) 2017-2023 OpenCFD Ltd.
 -------------------------------------------------------------------------------
 License
     This file is part of OpenFOAM.
@@ -52,6 +52,7 @@ Foam::fv::cellSetOption::selectionModeTypeNames_
     { selectionModeType::smAll, "all" },
     { selectionModeType::smGeometric, "geometric" },
     { selectionModeType::smPoints, "points" },
+    { selectionModeType::smMovingPoints, "movingPoints" },
     { selectionModeType::smCellSet, "cellSet" },
     { selectionModeType::smCellZone, "cellZone" },
     { selectionModeType::smCellType, "cellType" }
@@ -78,6 +79,31 @@ void Foam::fv::cellSetOption::setSelection(const dictionary& dict)
         case smPoints:
         {
             dict.readEntry("points", points_);
+            break;
+        }
+        case smMovingPoints:
+        {
+            const dictionary& mpsDict = dict.subDict("movingPoints");
+
+            movingPoints_.setSize(mpsDict.size());
+
+            label pointi = 0;
+            for (const entry& dEntry : mpsDict)
+            {
+                const word& key = dEntry.keyword();
+
+                movingPoints_.set
+                (
+                    pointi,
+                    Function1<point>::New
+                    (
+                        key,
+                        mpsDict,
+                        &mesh_
+                    )
+                );
+                ++pointi;
+            }
             break;
         }
         case smCellSet:
@@ -196,6 +222,11 @@ void Foam::fv::cellSetOption::setCellSelection()
             cells_ = selectedCells.sortedToc();
             break;
         }
+        case smMovingPoints:
+        {
+            // Delegate this task to a time-dependent function
+            break;
+        }
         case smCellSet:
         {
             Info<< indent
@@ -266,11 +297,57 @@ void Foam::fv::cellSetOption::setCellSelection()
         }
     }
 
-    if (smAll != selectionMode_ && returnReduceAnd(cells_.empty()))
+    if
+    (
+        !(smAll == selectionMode_ || smMovingPoints == selectionMode_)
+     && returnReduceAnd(cells_.empty())
+    )
     {
         WarningInFunction
             << "No cells selected!" << endl;
     }
+}
+
+
+bool Foam::fv::cellSetOption::setCellSelection(const scalar t)
+{
+    if (selectionMode_ != smMovingPoints)
+    {
+        return false;
+    }
+
+    Info<< indent << "- selecting cells using moving points" << endl;
+
+    labelHashSet selectedCells;
+
+    forAll(movingPoints_, i)
+    {
+        if (!movingPoints_.set(i))
+        {
+            continue;
+        }
+
+        const point p(movingPoints_[i].value(t));
+
+        const label celli = mesh_.findCell(p);
+
+        const bool found = (celli >= 0);
+
+        if (found)
+        {
+            selectedCells.insert(celli);
+        }
+
+        if (!returnReduceOr(found))
+        {
+            WarningInFunction
+                << "No owner cell found for point " << p << endl;
+        }
+    }
+
+    cells_ = selectedCells.sortedToc();
+
+    return true;
 }
 
 
@@ -290,6 +367,7 @@ Foam::fv::cellSetOption::cellSetOption
     selectionMode_(selectionModeTypeNames_.get("selectionMode", coeffs_)),
     selectionNames_(),
     points_(),
+    movingPoints_(),
     geometricSelection_(),
     V_(0)
 {
@@ -297,6 +375,7 @@ Foam::fv::cellSetOption::cellSetOption
     read(dict);
     setSelection(coeffs_);
     setCellSelection();
+    setCellSelection(mesh.time().timeOutputValue());
     setVol();
     Info<< decrIndent;
 }
@@ -329,6 +408,12 @@ bool Foam::fv::cellSetOption::isActive()
             }
 
             // Report new volume (if changed)
+            setVol();
+        }
+
+        // Update the cell selection if it moves
+        if (setCellSelection(mesh_.time().timeOutputValue()))
+        {
             setVol();
         }
 
