@@ -6,7 +6,7 @@
      \\/     M anipulation  |
 -------------------------------------------------------------------------------
     Copyright (C) 2011-2016 OpenFOAM Foundation
-    Copyright (C) 2016-2022 OpenCFD Ltd.
+    Copyright (C) 2016-2023 OpenCFD Ltd.
 -------------------------------------------------------------------------------
 License
     This file is part of OpenFOAM.
@@ -82,8 +82,9 @@ class ZoneMesh
 
     // Private Member Functions
 
-        //- Read if IOobject flags set. Return true if read.
-        bool readContents();
+        //- Return true if contents were read
+        //- (controlled by IOobject readOption flags).
+        bool readContents(const bool allowOptionalRead);
 
         //- Create zone map
         void calcZoneMap() const;
@@ -109,14 +110,25 @@ public:
 
     // Constructors
 
-        //- Read constructor given IOobject and a MeshType reference
+        //- Read constructor from IOobject and mesh reference
+        //- Any reading (mandatory, optional) based on IOobject properties.
         ZoneMesh
         (
             const IOobject& io,
             const MeshType& mesh
         );
 
-        //- Construct given size
+        //- Construct empty with IOobject properties and a mesh reference.
+        //- Does not read.
+        ZoneMesh
+        (
+            const IOobject& io,
+            const MeshType& mesh,
+            Foam::zero
+        );
+
+        //- Construct with specified size if not read.
+        //- Any reading (mandatory, optional) based on IOobject properties.
         ZoneMesh
         (
             const IOobject& io,
@@ -124,12 +136,13 @@ public:
             const label size
         );
 
-        //- Construct given a PtrList
+        //- Read construct (with MUST_READ or READ_IF_PRESENT) or use
+        //- the fallback PtrList (with cloning).
         ZoneMesh
         (
             const IOobject& io,
             const MeshType& mesh,
-            const PtrList<ZoneType>& pzm
+            const PtrList<ZoneType>& list
         );
 
 
@@ -140,10 +153,7 @@ public:
     // Member Functions
 
         //- Return the mesh reference
-        const MeshType& mesh() const noexcept
-        {
-            return mesh_;
-        }
+        const MeshType& mesh() const noexcept { return mesh_; }
 
         //- Map of zones containing zone index for all zoned elements
         //  Return -1 if the object is not in the zone

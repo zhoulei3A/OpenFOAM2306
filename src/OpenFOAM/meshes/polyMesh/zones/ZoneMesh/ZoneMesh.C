@@ -151,9 +151,16 @@ void Foam::ZoneMesh<ZoneType, MeshType>::calcGroupIDs() const
 
 
 template<class ZoneType, class MeshType>
-bool Foam::ZoneMesh<ZoneType, MeshType>::readContents()
+bool Foam::ZoneMesh<ZoneType, MeshType>::readContents
+(
+    const bool allowOptionalRead
+)
 {
-    if (isReadRequired() || (isReadOptional() && headerOk()))
+    if
+    (
+        isReadRequired()
+     || (allowOptionalRead && isReadOptional() && headerOk())
+    )
     {
         // Warn for MUST_READ_IF_MODIFIED
         warnNoRereading<ZoneMesh<ZoneType, MeshType>>();
@@ -205,8 +212,24 @@ Foam::ZoneMesh<ZoneType, MeshType>::ZoneMesh
     regIOobject(io),
     mesh_(mesh)
 {
-    readContents();
+    // Note: this is inconsistent with polyBoundaryMesh
+    // which does not permit optional reading
+    readContents(true);  // allowOptionalRead = true
 }
+
+
+template<class ZoneType, class MeshType>
+Foam::ZoneMesh<ZoneType, MeshType>::ZoneMesh
+(
+    const IOobject& io,
+    const MeshType& mesh,
+    Foam::zero
+)
+:
+    PtrList<ZoneType>(),
+    regIOobject(io),
+    mesh_(mesh)
+{}
 
 
 template<class ZoneType, class MeshType>
@@ -221,8 +244,9 @@ Foam::ZoneMesh<ZoneType, MeshType>::ZoneMesh
     regIOobject(io),
     mesh_(mesh)
 {
-    // Optionally read contents, otherwise keep size
-    readContents();
+    // Note: this is inconsistent with polyBoundaryMesh
+    // which does not read all
+    readContents(true);  // allowOptionalRead = true
 }
 
 
@@ -231,22 +255,22 @@ Foam::ZoneMesh<ZoneType, MeshType>::ZoneMesh
 (
     const IOobject& io,
     const MeshType& mesh,
-    const PtrList<ZoneType>& pzm
+    const PtrList<ZoneType>& list
 )
 :
     PtrList<ZoneType>(),
     regIOobject(io),
     mesh_(mesh)
 {
-    if (!readContents())
+    if (!readContents(true))  // allowOptionalRead = true
     {
         // Nothing read. Use supplied zones
         PtrList<ZoneType>& zones = *this;
-        zones.resize(pzm.size());
+        zones.resize(list.size());
 
         forAll(zones, zonei)
         {
-            zones.set(zonei, pzm[zonei].clone(*this));
+            zones.set(zonei, list[zonei].clone(*this));
         }
     }
 }
@@ -710,7 +734,7 @@ void Foam::ZoneMesh<ZoneType, MeshType>::setGroup
     const labelUList& zoneIDs
 )
 {
-    groupIDsPtr_.clear();
+    groupIDsPtr_.reset(nullptr);
 
     PtrList<ZoneType>& zones = *this;
 
@@ -740,8 +764,8 @@ void Foam::ZoneMesh<ZoneType, MeshType>::setGroup
 template<class ZoneType, class MeshType>
 void Foam::ZoneMesh<ZoneType, MeshType>::clearAddressing()
 {
-    zoneMapPtr_.clear();
-    groupIDsPtr_.clear();
+    zoneMapPtr_.reset(nullptr);
+    groupIDsPtr_.reset(nullptr);
 
     PtrList<ZoneType>& zones = *this;
 

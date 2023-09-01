@@ -6,7 +6,7 @@
      \\/     M anipulation  |
 -------------------------------------------------------------------------------
     Copyright (C) 2011-2016 OpenFOAM Foundation
-    Copyright (C) 2017-2022 OpenCFD Ltd.
+    Copyright (C) 2017-2023 OpenCFD Ltd.
 -------------------------------------------------------------------------------
 License
     This file is part of OpenFOAM.
@@ -31,7 +31,6 @@ License
 #include "faceZoneMesh.H"
 #include "polyMesh.H"
 #include "primitiveMesh.H"
-#include "demandDrivenData.H"
 #include "mapPolyMesh.H"
 #include "syncTools.H"
 
@@ -52,16 +51,8 @@ const char* const Foam::faceZone::labelsName = "faceLabels";
 void Foam::faceZone::setFlipMap(const bool val)
 {
     // Match size for flipMap
-    if (flipMap_.size() == this->size())
-    {
-        flipMap_ = val;
-    }
-    else
-    {
-        // Avoid copying old values on resize
-        flipMap_.clear();
-        flipMap_.resize(this->size(), val);
-    }
+    flipMap_.resize_nocopy(this->size());
+    flipMap_ = val;
 }
 
 
@@ -78,14 +69,15 @@ void Foam::faceZone::calcFaceZonePatch() const
             << abort(FatalError);
     }
 
-    patchPtr_ =
+    patchPtr_.reset
+    (
         new primitiveFacePatch
         (
             faceList(size()),
             zoneMesh().mesh().points()
-        );
-
-    primitiveFacePatch& patch = *patchPtr_;
+        )
+    );
+    auto& patch = *patchPtr_;
 
     const faceList& f = zoneMesh().mesh().faces();
 
@@ -110,11 +102,9 @@ void Foam::faceZone::calcFaceZonePatch() const
 
 void Foam::faceZone::calcCellLayers() const
 {
-    DebugInFunction << "Calculating master cells" << endl;
+    DebugInFunction << "Calculating cell layers" << endl;
 
-    // It is an error to attempt to recalculate edgeCells
-    // if the pointer is already set
-    if (masterCellsPtr_ || slaveCellsPtr_)
+    if (frontCellsPtr_ || backCellsPtr_)
     {
         FatalErrorInFunction
             << "cell layers already calculated"
@@ -122,46 +112,81 @@ void Foam::faceZone::calcCellLayers() const
     }
     else
     {
-        // Go through all the faces in the master zone.  Choose the
-        // master or slave cell based on the face flip
+        // Go through all the faces in the zone.
+        // Choose the front/back cell based on the face flip
 
         const labelList& own = zoneMesh().mesh().faceOwner();
         const labelList& nei = zoneMesh().mesh().faceNeighbour();
 
-        const labelList& mf = *this;
+        const labelList& addr = *this;
 
         const boolList& faceFlip = flipMap();
 
-        masterCellsPtr_ = new labelList(mf.size());
-        labelList& mc = *masterCellsPtr_;
+        frontCellsPtr_.reset(new labelList(addr.size()));
+        backCellsPtr_.reset(new labelList(addr.size()));
 
-        slaveCellsPtr_ = new labelList(mf.size());
-        labelList& sc = *slaveCellsPtr_;
+        auto& fronts = *frontCellsPtr_;
+        auto& backs = *backCellsPtr_;
 
-        forAll(mf, facei)
+        forAll(addr, facei)
         {
-            const label ownCelli = own[mf[facei]];
+            const label ownCelli = own[addr[facei]];
             const label neiCelli =
             (
-                zoneMesh().mesh().isInternalFace(mf[facei])
-              ? nei[mf[facei]]
+                zoneMesh().mesh().isInternalFace(addr[facei])
+              ? nei[addr[facei]]
               : -1
             );
 
-            if (!faceFlip[facei])
+            if (faceFlip[facei])
             {
-                // Face is oriented correctly, no flip needed
-                mc[facei] = neiCelli;
-                sc[facei] = ownCelli;
+                fronts[facei] = ownCelli;
+                backs[facei] = neiCelli;
             }
             else
             {
-                mc[facei] = ownCelli;
-                sc[facei] = neiCelli;
+                fronts[facei] = neiCelli;
+                backs[facei] = ownCelli;
             }
         }
     }
 }
+
+
+// Foam::label Foam::faceZone::getLayerCell
+// (
+//     const side which,
+//     const label i
+// ) const
+// {
+//     const label facei = labelList::operator[](i);
+//     const bool flipped = flipMap_[i];
+//
+//     if (which == side::FRONT ? flipped : !flipped)
+//     {
+//         return zoneMesh().mesh().faceOwner()[facei];
+//     }
+//     else if (zoneMesh().mesh().isInternalFace(facei))
+//     {
+//         return zoneMesh().mesh().faceNeighbour()[facei];
+//     }
+//     else
+//     {
+//         return -1;
+//     }
+// }
+//
+//
+// Foam::label Foam::faceZone::frontCell(const label i) const
+// {
+//     return getLayerCell(side::FRONT, i);
+// }
+//
+//
+// Foam::label Foam::faceZone::backCell(const label i) const
+// {
+//     return getLayerCell(side::BACK, i);
+// }
 
 
 void Foam::faceZone::checkAddressing() const
@@ -194,6 +219,12 @@ void Foam::faceZone::checkAddressing() const
 
 // * * * * * * * * * * * * * * * * Constructors  * * * * * * * * * * * * * * //
 
+Foam::faceZone::faceZone(const faceZoneMesh& zm)
+:
+    faceZone(word::null, 0, zm)
+{}
+
+
 Foam::faceZone::faceZone
 (
     const word& name,
@@ -205,8 +236,8 @@ Foam::faceZone::faceZone
     flipMap_(),
     zoneMesh_(zm),
     patchPtr_(nullptr),
-    masterCellsPtr_(nullptr),
-    slaveCellsPtr_(nullptr),
+    frontCellsPtr_(nullptr),
+    backCellsPtr_(nullptr),
     mePtr_(nullptr)
 {}
 
@@ -220,15 +251,11 @@ Foam::faceZone::faceZone
     const faceZoneMesh& zm
 )
 :
-    zone(name, addr, index),
-    flipMap_(),
-    zoneMesh_(zm),
-    patchPtr_(nullptr),
-    masterCellsPtr_(nullptr),
-    slaveCellsPtr_(nullptr),
-    mePtr_(nullptr)
+    faceZone(name, index, zm)
 {
-    flipMap_.resize(size(), flipMapValue);
+    labelList::operator=(addr);
+    flipMap_.resize(labelList::size(), flipMapValue);
+
     checkAddressing();
 }
 
@@ -242,15 +269,10 @@ Foam::faceZone::faceZone
     const faceZoneMesh& zm
 )
 :
-    zone(name, std::move(addr), index),
-    flipMap_(),
-    zoneMesh_(zm),
-    patchPtr_(nullptr),
-    masterCellsPtr_(nullptr),
-    slaveCellsPtr_(nullptr),
-    mePtr_(nullptr)
+    faceZone(name, index, zm)
 {
-    flipMap_.resize(size(), flipMapValue);
+    labelList::transfer(addr);
+    flipMap_.resize(labelList::size(), flipMapValue);
     checkAddressing();
 }
 
@@ -264,14 +286,18 @@ Foam::faceZone::faceZone
     const faceZoneMesh& zm
 )
 :
-    zone(name, addr, index),
-    flipMap_(fm),
-    zoneMesh_(zm),
-    patchPtr_(nullptr),
-    masterCellsPtr_(nullptr),
-    slaveCellsPtr_(nullptr),
-    mePtr_(nullptr)
+    faceZone(name, index, zm)
 {
+    labelList::operator=(addr);
+    flipMap_ = fm;
+
+    // TBD
+    // if (flipMap_.empty())
+    // {
+    //     // An empty flipMap is treated like 'false' instead of as an error
+    //     flipMap_.resize(labelList::size(), false);
+    // }
+
     checkAddressing();
 }
 
@@ -285,14 +311,18 @@ Foam::faceZone::faceZone
     const faceZoneMesh& zm
 )
 :
-    zone(name, std::move(addr), index),
-    flipMap_(std::move(fm)),
-    zoneMesh_(zm),
-    patchPtr_(nullptr),
-    masterCellsPtr_(nullptr),
-    slaveCellsPtr_(nullptr),
-    mePtr_(nullptr)
+    faceZone(name, index, zm)
 {
+    labelList::transfer(addr);
+    flipMap_.transfer(fm);
+
+    // TBD
+    // if (flipMap_.empty())
+    // {
+    //     // An empty flipMap is treated like 'false' instead of as an error
+    //     flipMap_.resize(labelList::size(), false);
+    // }
+
     checkAddressing();
 }
 
@@ -309,8 +339,8 @@ Foam::faceZone::faceZone
     flipMap_(dict.lookup("flipMap")),
     zoneMesh_(zm),
     patchPtr_(nullptr),
-    masterCellsPtr_(nullptr),
-    slaveCellsPtr_(nullptr),
+    frontCellsPtr_(nullptr),
+    backCellsPtr_(nullptr),
     mePtr_(nullptr)
 {
     checkAddressing();
@@ -319,42 +349,62 @@ Foam::faceZone::faceZone
 
 Foam::faceZone::faceZone
 (
-    const faceZone& origZone,
+    const faceZone& originalZone,
+    const Foam::zero,
+    const faceZoneMesh& zm,
+    const label newIndex
+)
+:
+    zone(originalZone, labelList(), newIndex),
+    zoneMesh_(zm)
+{}
+
+
+Foam::faceZone::faceZone
+(
+    const faceZone& originalZone,
+    const Foam::zero,
+    const label index,
+    const faceZoneMesh& zm
+)
+:
+    zone(originalZone, labelList(), index),
+    zoneMesh_(zm)
+{}
+
+
+Foam::faceZone::faceZone
+(
+    const faceZone& originalZone,
     const labelUList& addr,
     const boolUList& fm,
     const label index,
     const faceZoneMesh& zm
 )
 :
-    zone(origZone, addr, index),
-    flipMap_(fm),
-    zoneMesh_(zm),
-    patchPtr_(nullptr),
-    masterCellsPtr_(nullptr),
-    slaveCellsPtr_(nullptr),
-    mePtr_(nullptr)
+    faceZone(originalZone, Foam::zero{}, index, zm)
 {
+    labelList::operator=(addr);
+    flipMap_ = fm;
+
     checkAddressing();
 }
 
 
 Foam::faceZone::faceZone
 (
-    const faceZone& origZone,
+    const faceZone& originalZone,
     labelList&& addr,
     boolList&& fm,
     const label index,
     const faceZoneMesh& zm
 )
 :
-    zone(origZone, std::move(addr), index),
-    flipMap_(std::move(fm)),
-    zoneMesh_(zm),
-    patchPtr_(nullptr),
-    masterCellsPtr_(nullptr),
-    slaveCellsPtr_(nullptr),
-    mePtr_(nullptr)
+    faceZone(originalZone, Foam::zero{}, index, zm)
 {
+    labelList::transfer(addr);
+    flipMap_.transfer(fm);
+
     checkAddressing();
 }
 
@@ -375,7 +425,7 @@ Foam::label Foam::faceZone::whichFace(const label globalFaceID) const
 }
 
 
-const Foam::primitiveFacePatch& Foam::faceZone::operator()() const
+const Foam::primitiveFacePatch& Foam::faceZone::patch() const
 {
     if (!patchPtr_)
     {
@@ -386,25 +436,23 @@ const Foam::primitiveFacePatch& Foam::faceZone::operator()() const
 }
 
 
-const Foam::labelList& Foam::faceZone::masterCells() const
+const Foam::labelList& Foam::faceZone::frontCells() const
 {
-    if (!masterCellsPtr_)
+    if (!frontCellsPtr_)
     {
         calcCellLayers();
     }
-
-    return *masterCellsPtr_;
+    return *frontCellsPtr_;
 }
 
 
-const Foam::labelList& Foam::faceZone::slaveCells() const
+const Foam::labelList& Foam::faceZone::backCells() const
 {
-    if (!slaveCellsPtr_)
+    if (!backCellsPtr_)
     {
         calcCellLayers();
     }
-
-    return *slaveCellsPtr_;
+    return *backCellsPtr_;
 }
 
 
@@ -412,15 +460,17 @@ const Foam::labelList& Foam::faceZone::meshEdges() const
 {
     if (!mePtr_)
     {
-        mePtr_ =
+        mePtr_.reset
+        (
             new labelList
             (
-                operator()().meshEdges
+                this->patch().meshEdges
                 (
                     zoneMesh().mesh().edges(),
                     zoneMesh().mesh().pointEdges()
                 )
-            );
+            )
+        );
     }
 
     return *mePtr_;
@@ -431,12 +481,27 @@ void Foam::faceZone::clearAddressing()
 {
     zone::clearAddressing();
 
-    deleteDemandDrivenData(patchPtr_);
+    patchPtr_.reset(nullptr);
+    frontCellsPtr_.reset(nullptr);
+    backCellsPtr_.reset(nullptr);
+    mePtr_.reset(nullptr);
+}
 
-    deleteDemandDrivenData(masterCellsPtr_);
-    deleteDemandDrivenData(slaveCellsPtr_);
 
-    deleteDemandDrivenData(mePtr_);
+void Foam::faceZone::resetAddressing(faceZone&& zn)
+{
+    clearAddressing();
+    labelList::transfer(static_cast<labelList&>(zn));
+    flipMap_.transfer(zn.flipMap_);
+    zn.clearAddressing();
+}
+
+
+void Foam::faceZone::resetAddressing(const faceZone& zn)
+{
+    clearAddressing();
+    labelList::operator=(static_cast<const labelList&>(zn));
+    flipMap_ = zn.flipMap_;
 }
 
 
@@ -448,6 +513,18 @@ void Foam::faceZone::resetAddressing
 {
     clearAddressing();
     labelList::operator=(addr);
+    setFlipMap(flipMapValue);
+}
+
+
+void Foam::faceZone::resetAddressing
+(
+    labelList&& addr,
+    const bool flipMapValue
+)
+{
+    clearAddressing();
+    labelList::transfer(addr);
     setFlipMap(flipMapValue);
 }
 
@@ -461,18 +538,6 @@ void Foam::faceZone::resetAddressing
     clearAddressing();
     labelList::operator=(addr);
     flipMap_ = flipMap;
-}
-
-
-void Foam::faceZone::resetAddressing
-(
-    labelList&& addr,
-    const bool flipMapValue
-)
-{
-    clearAddressing();
-    labelList::transfer(addr);
-    setFlipMap(flipMapValue);
 }
 
 
@@ -495,14 +560,14 @@ void Foam::faceZone::updateMesh(const mapPolyMesh& mpm)
         {
             newAddressing[nFaces] = faceMap[facei];
             newFlipMap[nFaces] = flipMap_[i];       // Keep flip map.
-            nFaces++;
+            ++nFaces;
         }
     }
 
-    newAddressing.setSize(nFaces);
-    newFlipMap.setSize(nFaces);
+    newAddressing.resize(nFaces);
+    newFlipMap.resize(nFaces);
 
-    transfer(newAddressing);
+    labelList::transfer(newAddressing);
     flipMap_.transfer(newFlipMap);
 }
 
@@ -631,6 +696,22 @@ void Foam::faceZone::writeDict(Ostream& os) const
     flipMap().writeEntry("flipMap", os);
 
     os.endBlock();
+}
+
+
+// * * * * * * * * * * * * * * * Member Operators  * * * * * * * * * * * * * //
+
+const Foam::primitiveFacePatch& Foam::faceZone::operator()() const
+{
+    return this->patch();
+}
+
+
+void Foam::faceZone::operator=(const faceZone& zn)
+{
+    clearAddressing();
+    labelList::operator=(static_cast<const labelList&>(zn));
+    flipMap_ = zn.flipMap_;
 }
 
 

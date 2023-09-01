@@ -6,7 +6,7 @@
      \\/     M anipulation  |
 -------------------------------------------------------------------------------
     Copyright (C) 2011-2016 OpenFOAM Foundation
-    Copyright (C) 2017-2021 OpenCFD Ltd.
+    Copyright (C) 2017-2023 OpenCFD Ltd.
 -------------------------------------------------------------------------------
 License
     This file is part of OpenFOAM.
@@ -38,8 +38,8 @@ SourceFiles
 
 \*---------------------------------------------------------------------------*/
 
-#ifndef zone_H
-#define zone_H
+#ifndef Foam_zone_H
+#define Foam_zone_H
 
 #include "zoneIdentifier.H"
 #include "labelList.H"
@@ -69,13 +69,13 @@ class zone
     // Private Data
 
         //- Demand-driven: map of labels in zone for fast location lookup
-        mutable Map<label>* lookupMapPtr_;
+        mutable std::unique_ptr<Map<label>> lookupMapPtr_;
 
 
 public:
 
     //- Runtime type information
-    TypeName("zone");
+    TypeNameNoDebug("zone");
 
 
     // Constructors
@@ -83,7 +83,7 @@ public:
         //- Default construct
         zone();
 
-        //- Construct an empty zone
+        //- Construct an empty zone with specified name and index
         zone(const word& name, const label index);
 
         //- Copy construct from components
@@ -112,19 +112,19 @@ public:
         );
 
         //- Construct given the name of the original zone (name is used)
-        //- and resetting addressing and index.
+        //- with new addressing and index (-ve: retain zone index).
         zone
         (
-            const zone& origZone,
+            const zone& originalZone,
             const labelUList& addr,
             const label index
         );
 
         //- Construct given the name of the original zone (name is used)
-        //- and (move) resetting addressing and index.
+        //- and (move) resetting addressing and index (-ve: retain zone index).
         zone
         (
-            const zone& origZone,
+            const zone& originalZone,
             labelList&& addr,
             const label index
         );
@@ -142,7 +142,6 @@ public:
         //- Lookup local address in zone for given global index.
         //  \return the local address, or -1 if the item is not in the zone
         label localID(const label globalID) const;
-
 
         //- The addressing used by the zone
         const labelList& addressing() const noexcept

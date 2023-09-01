@@ -105,12 +105,12 @@ void Foam::polyBoundaryMesh::calcGroupIDs() const
 }
 
 
-bool Foam::polyBoundaryMesh::readContents(const bool allowReadIfPresent)
+bool Foam::polyBoundaryMesh::readContents(const bool allowOptionalRead)
 {
     if
     (
         this->isReadRequired()
-     || (allowReadIfPresent && this->isReadOptional() && this->headerOk())
+     || (allowOptionalRead && this->isReadOptional() && this->headerOk())
     )
     {
         // Warn for MUST_READ_IF_MODIFIED
@@ -162,8 +162,21 @@ Foam::polyBoundaryMesh::polyBoundaryMesh
     regIOobject(io),
     mesh_(mesh)
 {
-    readContents(false);  // READ_IF_PRESENT allowed: False
+    readContents(false);  // allowOptionalRead = false
 }
+
+
+Foam::polyBoundaryMesh::polyBoundaryMesh
+(
+    const IOobject& io,
+    const polyMesh& pm,
+    Foam::zero
+)
+:
+    polyPatchList(),
+    regIOobject(io),
+    mesh_(pm)
+{}
 
 
 Foam::polyBoundaryMesh::polyBoundaryMesh
@@ -183,20 +196,21 @@ Foam::polyBoundaryMesh::polyBoundaryMesh
 (
     const IOobject& io,
     const polyMesh& pm,
-    const polyPatchList& ppl
+    const polyPatchList& list
 )
 :
     polyPatchList(),
     regIOobject(io),
     mesh_(pm)
 {
-    if (!readContents(true))  // READ_IF_PRESENT allowed: True
+    if (!readContents(true))  // allowOptionalRead = true
     {
         polyPatchList& patches = *this;
-        patches.resize(ppl.size());
+        patches.resize(list.size());
+
         forAll(patches, patchi)
         {
-            patches.set(patchi, ppl[patchi].clone(*this));
+            patches.set(patchi, list[patchi].clone(*this));
         }
     }
 }
