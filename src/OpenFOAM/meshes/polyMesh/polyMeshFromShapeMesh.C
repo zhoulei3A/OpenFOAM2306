@@ -6,7 +6,7 @@
      \\/     M anipulation  |
 -------------------------------------------------------------------------------
     Copyright (C) 2011-2016, 2020 OpenFOAM Foundation
-    Copyright (C) 2018-2022 OpenCFD Ltd.
+    Copyright (C) 2018-2023 OpenCFD Ltd.
 -------------------------------------------------------------------------------
 License
     This file is part of OpenFOAM.
@@ -543,7 +543,7 @@ Foam::polyMesh::polyMesh
             IOobject::NO_WRITE
         ),
         *this,
-        0
+        Foam::zero{}
     ),
     faceZones_
     (
@@ -557,7 +557,7 @@ Foam::polyMesh::polyMesh
             IOobject::NO_WRITE
         ),
         *this,
-        0
+        Foam::zero{}
     ),
     cellZones_
     (
@@ -571,7 +571,7 @@ Foam::polyMesh::polyMesh
             IOobject::NO_WRITE
         ),
         *this,
-        0
+        Foam::zero{}
     ),
     globalMeshDataPtr_(nullptr),
     moving_(false),
@@ -824,7 +824,7 @@ Foam::polyMesh::polyMesh
             IOobject::NO_WRITE
         ),
         *this,
-        0
+        Foam::zero{}
     ),
     faceZones_
     (
@@ -838,7 +838,7 @@ Foam::polyMesh::polyMesh
             IOobject::NO_WRITE
         ),
         *this,
-        0
+        Foam::zero{}
     ),
     cellZones_
     (
@@ -852,7 +852,7 @@ Foam::polyMesh::polyMesh
             IOobject::NO_WRITE
         ),
         *this,
-        0
+        Foam::zero{}
     ),
     globalMeshDataPtr_(nullptr),
     moving_(false),

@@ -252,57 +252,42 @@ Foam::polyMesh::polyMesh(const IOobject& io, const bool doInit)
         IOobject
         (
             "pointZones",
-            //time().findInstance
-            //(
-            //    meshDir(),
-            //    "pointZones",
-            //    IOobject::READ_IF_PRESENT
-            //),
             faces_.instance(),
             meshSubDir,
             *this,
             IOobject::READ_IF_PRESENT,
             IOobject::NO_WRITE
         ),
-        *this
+        *this,
+        PtrList<pointZone>()
     ),
     faceZones_
     (
         IOobject
         (
             "faceZones",
-            //time().findInstance
-            //(
-            //    meshDir(),
-            //    "faceZones",
-            //    IOobject::READ_IF_PRESENT
-            //),
             faces_.instance(),
             meshSubDir,
             *this,
             IOobject::READ_IF_PRESENT,
             IOobject::NO_WRITE
         ),
-        *this
+        *this,
+        PtrList<faceZone>()
     ),
     cellZones_
     (
         IOobject
         (
             "cellZones",
-            //time().findInstance
-            //(
-            //    meshDir(),
-            //    "cellZones",
-            //    IOobject::READ_IF_PRESENT
-            //),
             faces_.instance(),
             meshSubDir,
             *this,
             IOobject::READ_IF_PRESENT,
             IOobject::NO_WRITE
         ),
-        *this
+        *this,
+        PtrList<cellZone>()
     ),
     globalMeshDataPtr_(nullptr),
     moving_(false),
@@ -480,7 +465,7 @@ Foam::polyMesh::polyMesh
             IOobject::NO_WRITE
         ),
         *this,
-        PtrList<pointZone>()
+        Foam::zero{}
     ),
     faceZones_
     (
@@ -494,7 +479,7 @@ Foam::polyMesh::polyMesh
             IOobject::NO_WRITE
         ),
         *this,
-        PtrList<faceZone>()
+        Foam::zero{}
     ),
     cellZones_
     (
@@ -508,7 +493,7 @@ Foam::polyMesh::polyMesh
             IOobject::NO_WRITE
         ),
         *this,
-        PtrList<cellZone>()
+        Foam::zero{}
     ),
     globalMeshDataPtr_(nullptr),
     moving_(false),
@@ -633,7 +618,7 @@ Foam::polyMesh::polyMesh
             IOobject::NO_WRITE
         ),
         *this,
-        0
+        Foam::zero{}
     ),
     faceZones_
     (
@@ -647,7 +632,7 @@ Foam::polyMesh::polyMesh
             IOobject::NO_WRITE
         ),
         *this,
-        0
+        Foam::zero{}
     ),
     cellZones_
     (
@@ -661,7 +646,7 @@ Foam::polyMesh::polyMesh
             IOobject::NO_WRITE
         ),
         *this,
-        0
+        Foam::zero{}
     ),
     globalMeshDataPtr_(nullptr),
     moving_(false),
