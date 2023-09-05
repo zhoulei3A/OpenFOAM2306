@@ -41,7 +41,7 @@ SourceFiles
 #ifndef Foam_masterOFstream_H
 #define Foam_masterOFstream_H
 
-#include "StringStream.H"
+#include "SpanStream.H"
 #include "UPstream.H"
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
@@ -55,7 +55,7 @@ namespace Foam
 
 class masterOFstream
 :
-    public OStringStream
+    public OCharStream
 {
     // Private Data
 
@@ -84,14 +84,10 @@ class masterOFstream
         void checkWrite
         (
             const fileName& fName,
-            const char* str,
-            std::streamsize len
+            const UList<char>& charData
         );
 
-        //- Open file with checking and write append contents
-        void checkWrite(const fileName& fName, const std::string& s);
-
-        //- Commit buffered information, including parallel gather as required
+        //- Commit buffered information, including communication as required
         void commit();
 
 
