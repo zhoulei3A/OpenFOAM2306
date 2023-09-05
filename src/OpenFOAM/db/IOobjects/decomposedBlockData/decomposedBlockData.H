@@ -135,16 +135,6 @@ protected:
 
     // Protected Member Functions
 
-        //- Helper: determine number of processors whose recvSizes fits
-        //- into maxBufferSize
-        static label calcNumProcs
-        (
-            const label comm,
-            const off_t maxBufferSize,
-            const labelUList& recvSizes,
-            const label startProci
-        );
-
         //- Read data into *this. ISstream is only valid on master.
         static bool readBlocks
         (
@@ -265,12 +255,30 @@ public:
         );
 
         //- Helper: write block of (binary) character content
+        //  Housekeeping
         static std::streamoff writeBlockEntry
         (
             OSstream& os,
             const label blocki,
-            const std::string& content
-        );
+            const stdFoam::span<char>& s
+        )
+        {
+            UList<char> charData(const_cast<char*>(s.data()), label(s.size()));
+            return decomposedBlockData::writeBlockEntry(os, blocki, charData);
+        }
+
+        //- Helper: write block of (binary) character content
+        //  Housekeeping
+        static std::streamoff writeBlockEntry
+        (
+            OSstream& os,
+            const label blocki,
+            const std::string& s
+        )
+        {
+            UList<char> charData(const_cast<char*>(s.data()), label(s.size()));
+            return decomposedBlockData::writeBlockEntry(os, blocki, charData);
+        }
 
         //- Helper: write block of (binary) character data
         //  \return -1 on error
@@ -302,31 +310,25 @@ public:
             const UPstream::commsTypes commsType
         );
 
-        //- Helper: gather single label. Note: using native Pstream.
-        //  datas sized with num procs but undefined contents on
-        //  slaves
-        static void gather
-        (
-            const label comm,
-            const label data,
-            labelList& datas
-        );
-
-        //- Helper: gather data from (subset of) slaves.
+        //- Helper: gather data from (subset of) sub-ranks.
+        //  In non-blocking mode it sets up send/recv for non-empty content.
+        //  In blocking/scheduled mode it uses MPI_Gatherv to collect data.
         //
         //  Returns:
-        //  - recvData : received data
+        //  - recvData : the received data
         //  - recvOffsets : offset in data. recvOffsets is nProcs+1
-        static void gatherSlaveData
+        static void gatherProcData
         (
             const label comm,
-            const UList<char>& data,
-            const labelUList& recvSizes,
+            const UList<char>& localData, // [in] required on all procs
+            const labelUList& recvSizes,  // [in] only required on master
 
-            const labelRange& fromProcs,
+            const labelRange& fromProcs,  // [in] required on all procs
 
-            List<int>& recvOffsets,
-            DynamicList<char>& recvData
+            List<int>& recvOffsets,       // [out] only relevant on master
+            DynamicList<char>& recvData,  // [out] only relevant on master
+
+            const UPstream::commsTypes commsType
         );
 
         //- Write *this. Ostream only valid on master.
@@ -337,16 +339,92 @@ public:
             autoPtr<OSstream>& osPtr,
             List<std::streamoff>& blockOffset,
 
-            const UList<char>& masterData,
+            // Data on local proc
+            const UList<char>& localData,
 
-            const labelUList& recvSizes,
+            const labelUList& recvSizes,  // Only required on master
 
-            // Optional slave data (on master)
-            const UPtrList<SubList<char>>& slaveData,
+            // Optional proc data (only written on master)
+            // but must also be symmetrically defined on non-master
+            const UList<stdFoam::span<char>>& procData,
 
             const UPstream::commsTypes commsType,
             const bool syncReturnState = true
         );
+
+
+    // Housekeeping
+
+        //- Write *this. Ostream only valid on master.
+        //  Returns offsets of processor blocks in blockOffset
+        static bool writeBlocks
+        (
+            const label comm,
+            autoPtr<OSstream>& osPtr,
+            List<std::streamoff>& blockOffset,
+
+            // Data on local proc
+            const UList<char>& localData,
+
+            const labelUList& recvSizes,  // Only required on master
+
+            // Optional proc data (only written on master)
+            // but must also be symmetrically defined on non-master
+            const UPtrList<SubList<char>>& procData,
+
+            const UPstream::commsTypes commsType,
+            const bool syncReturnState = true
+        )
+        {
+            // Transcribe to span<char>
+            List<stdFoam::span<char>> spans(procData.size());
+            forAll(procData, proci)
+            {
+                if (procData.test(proci))
+                {
+                    spans[proci] = stdFoam::span<char>
+                    (
+                        const_cast<char*>(procData[proci].cdata()),
+                        procData[proci].size()
+                    );
+                }
+            }
+
+            return decomposedBlockData::writeBlocks
+            (
+                comm,
+                osPtr,
+                blockOffset,
+                localData,
+                recvSizes,
+                spans,
+                commsType,
+                syncReturnState
+            );
+        }
+
+        //- Deprecated(2023-09) - consider UPstream::listGatherValue
+        //  The only difference is that this gather also resizes the output
+        //  on the non-master procs
+        //  \deprecated(2023-09) - consider UPstream::listGatherValue
+        FOAM_DEPRECATED_FOR(2023-09, "consider UPstream::listGatherValue()")
+        static void gather
+        (
+            const label comm,
+            const label localValue,
+            labelList& allValues
+        )
+        {
+            allValues.resize_nocopy(UPstream::nProcs(comm));
+
+            UPstream::mpiGather
+            (
+                reinterpret_cast<const char*>(&localValue),
+                allValues.data_bytes(),
+                sizeof(label),  // The send/recv size per rank
+                comm
+            );
+        }
 };
 
 

@@ -29,16 +29,11 @@ License
 #include "decomposedBlockData.H"
 #include "OPstream.H"
 #include "IPstream.H"
-#include "PstreamBuffers.H"
 #include "Fstream.H"
+#include "SpanStream.H"
 #include "dictionary.H"
 #include "objectRegistry.H"
-#include "SubList.H"
-#include "charList.H"
-#include "labelPair.H"
 #include "masterUncollatedFileOperation.H"
-#include "SpanStream.H"
-#include "StringStream.H"
 
 // * * * * * * * * * * * * * * Static Data Members * * * * * * * * * * * * * //
 
@@ -192,7 +187,7 @@ bool Foam::decomposedBlockData::skipBlockEntry(Istream& is)
 
             // read(...) includes surrounding start/end delimiters.
 
-            // Note: nullptr to seek instead of reading
+            // Note: nullptr to ignore instead of reading
             is.read(nullptr, std::streamsize(len));
 
             is.format(oldFmt);
@@ -296,6 +291,8 @@ std::streamoff Foam::decomposedBlockData::writeBlockEntry
 )
 {
     // Offset to the beginning of this output
+    // This should generally be OK for non-compressed streams
+    // (eg, std::ofstream)
 
     std::streamoff blockOffset = os.stdStream().tellp();
 
@@ -320,33 +317,16 @@ std::streamoff Foam::decomposedBlockData::writeBlockEntry
 std::streamoff Foam::decomposedBlockData::writeBlockEntry
 (
     OSstream& os,
-    const label blocki,
-    const std::string& content
-)
-{
-    UList<char> charData
-    (
-        const_cast<char*>(content.data()),
-        label(content.size())
-    );
-
-    return decomposedBlockData::writeBlockEntry(os, blocki, charData);
-}
-
-
-std::streamoff Foam::decomposedBlockData::writeBlockEntry
-(
-    OSstream& os,
     IOstreamOption streamOptData,
     const regIOobject& io,
     const label blocki,
     const bool withLocalHeader
 )
 {
-    // String of all data to write
-    string contentChars;
+    // Serialize content to write
+    List<char> contentChars;
     {
-        OStringStream buf(streamOptData);
+        OCharStream buf(streamOptData);
 
         bool ok = true;
 
@@ -368,7 +348,8 @@ std::streamoff Foam::decomposedBlockData::writeBlockEntry
             return std::streamoff(-1);
         }
 
-        contentChars = buf.str();
+        // Retrieve the output content
+        buf.swap(contentChars);
     }
 
     return decomposedBlockData::writeBlockEntry(os, blocki, contentChars);
@@ -435,11 +416,15 @@ Foam::decomposedBlockData::readBlock
             scalarWidth = headerStream.scalarByteSize();
         }
 
-        for (label i = 1; i < blocki+1; i++)
+        // Skip intermediate blocks
+        for (label i = 1; i < blocki; ++i)
         {
-            // Read and discard data, only retain the last one
-            decomposedBlockData::readBlockEntry(is, data);
+            decomposedBlockData::skipBlockEntry(is);
         }
+
+        // Read the block of interest
+        decomposedBlockData::readBlockEntry(is, data);
+
         realIsPtr.reset(new ICharStream(std::move(data)));
         realIsPtr->name() = is.name();
 
@@ -459,18 +444,22 @@ bool Foam::decomposedBlockData::readBlocks
     const label comm,
     autoPtr<ISstream>& isPtr,
     List<char>& data,
-    const UPstream::commsTypes commsType
+    const UPstream::commsTypes  /* unused */
 )
 {
     if (debug)
     {
         Pout<< "decomposedBlockData::readBlocks:"
             << " stream:" << (isPtr ? isPtr->name() : "invalid")
-            << " commsType:" << Pstream::commsTypeNames[commsType]
-            << " comm:" << comm << endl;
+            << " non-blocking comm:" << comm << endl;
     }
 
+    // Read data on master and transmit. Always non-blocking
+
     bool ok = false;
+    List<List<char>> procData;
+
+    const label startOfRequests = UPstream::nRequests();
 
     if (UPstream::master(comm))
     {
@@ -479,78 +468,60 @@ bool Foam::decomposedBlockData::readBlocks
 
         // Read master data
         decomposedBlockData::readBlockEntry(is, data);
-    }
 
-    if (commsType == UPstream::commsTypes::scheduled)
-    {
-        if (UPstream::master(comm))
+        // Read proc data and setup non-blocking sends
+        procData.resize(UPstream::nProcs(comm));
+        for (const int proci : UPstream::subProcs(comm))
         {
-            // Master data already read ...
-            auto& is = *isPtr;
-            is.fatalCheck(FUNCTION_NAME);
+            List<char>& procSlice = procData[proci];
+            decomposedBlockData::readBlockEntry(is, procSlice);
 
-            // Read and transmit slave data
-            for (const int proci : UPstream::subProcs(comm))
-            {
-                List<char> elems;
-                decomposedBlockData::readBlockEntry(is, elems);
-
-                OPstream os
-                (
-                    UPstream::commsTypes::scheduled,
-                    proci,
-                    0,
-                    UPstream::msgType(),
-                    comm
-                );
-                os << elems;
-            }
-
-            ok = is.good();
-        }
-        else
-        {
-            IPstream is
+            // Send content (non-blocking)
+            UOPstream::write
             (
-                UPstream::commsTypes::scheduled,
-                UPstream::masterNo(),
-                0,
+                UPstream::commsTypes::nonBlocking,
+                proci,
+                procSlice.cdata(),
+                procSlice.size_bytes(),
                 UPstream::msgType(),
                 comm
             );
-            is >> data;
         }
+
+        ok = is.good();
     }
-    else
+    else if (UPstream::is_subrank(comm))
     {
-        PstreamBuffers pBufs(comm, UPstream::commsTypes::nonBlocking);
+        List<char>& procSlice = data;
 
-        if (UPstream::master(comm))
-        {
-            // Master data already read ...
-            auto& is = *isPtr;
-            is.fatalCheck(FUNCTION_NAME);
+        // Probe the incoming message source/size
+        std::pair<int, int> probed =
+            UPstream::probeMessage
+            (
+                UPstream::commsTypes::blocking,
+                UPstream::masterNo(),
+                UPstream::msgType(),
+                comm
+            );
 
-            // Read and transmit slave data
-            for (const int proci : UPstream::subProcs(comm))
-            {
-                List<char> elems;
-                decomposedBlockData::readBlockEntry(is, elems);
+        procSlice.resize_nocopy(probed.second);
 
-                UOPstream os(proci, pBufs);
-                os << elems;
-            }
-        }
-
-        pBufs.finishedScatters();
-
-        if (!UPstream::master(comm))
-        {
-            UIPstream is(UPstream::masterNo(), pBufs);
-            is >> data;
-        }
+        // Receive content (can also be zero-sized)
+        UIPstream::read
+        (
+            UPstream::commsTypes::nonBlocking,
+            UPstream::masterNo(),
+            procSlice.data(),
+            procSlice.size_bytes(),
+            UPstream::msgType(),
+            comm
+        );
     }
 
+    UPstream::waitRequests(startOfRequests);
+    procData.clear();
+
+    // Sync the status
     Pstream::broadcast(ok, comm);
 
     return ok;
@@ -563,19 +534,23 @@ Foam::autoPtr<Foam::ISstream> Foam::decomposedBlockData::readBlocks
     const fileName& fName,
     autoPtr<ISstream>& isPtr,
     IOobject& headerIO,
-    const UPstream::commsTypes commsType
+    const UPstream::commsTypes  /* unused */
 )
 {
     if (debug)
     {
         Pout<< "decomposedBlockData::readBlocks:"
             << " stream:" << (isPtr ? isPtr->name() : "invalid")
-            << " commsType:" << Pstream::commsTypeNames[commsType] << endl;
+            << " non-blocking" << endl;
     }
 
+    // Read data on master and transmit. Always non-blocking
     bool ok = false;
-    List<char> data;
+    List<char> localData;
+    List<List<char>> procData;
     autoPtr<ISstream> realIsPtr;
+
+    const label startOfRequests = UPstream::nRequests();
 
     if (UPstream::master(comm))
     {
@@ -583,9 +558,10 @@ Foam::autoPtr<Foam::ISstream> Foam::decomposedBlockData::readBlocks
         is.fatalCheck(FUNCTION_NAME);
 
         // Read master data
-        decomposedBlockData::readBlockEntry(is, data);
+        decomposedBlockData::readBlockEntry(is, localData);
 
-        realIsPtr.reset(new ICharStream(std::move(data)));
+        // Move block data into a stream
+        realIsPtr.reset(new ICharStream(std::move(localData)));
         realIsPtr->name() = fName;
 
         {
@@ -599,86 +575,70 @@ Foam::autoPtr<Foam::ISstream> Foam::decomposedBlockData::readBlocks
                     << exit(FatalIOError);
             }
         }
-    }
 
-    if (commsType == UPstream::commsTypes::scheduled)
-    {
-        if (UPstream::master(comm))
+        // Read proc data and setup non-blocking sends
+        procData.resize(UPstream::nProcs(comm));
+        for (const int proci : UPstream::subProcs(comm))
         {
-            // Master data already read ...
-            auto& is = *isPtr;
-            is.fatalCheck(FUNCTION_NAME);
+            List<char>& procSlice = procData[proci];
+            decomposedBlockData::readBlockEntry(is, procSlice);
 
-            // Read and transmit slave data
-            for (const int proci : UPstream::subProcs(comm))
-            {
-                decomposedBlockData::readBlockEntry(is, data);
-
-                OPstream os
-                (
-                    UPstream::commsTypes::scheduled,
-                    proci,
-                    0,
-                    UPstream::msgType(),
-                    comm
-                );
-                os << data;
-            }
-
-            ok = is.good();
-        }
-        else
-        {
-            IPstream is
+            // Send content - non-blocking mode
+            UOPstream::write
             (
-                UPstream::commsTypes::scheduled,
-                UPstream::masterNo(),
-                0,
+                UPstream::commsTypes::nonBlocking,
+                proci,
+                procSlice.cdata(),
+                procSlice.size_bytes(),
                 UPstream::msgType(),
                 comm
             );
-            is >> data;
-
-            realIsPtr.reset(new ICharStream(std::move(data)));
-            realIsPtr->name() = fName;
         }
+
+        ok = is.good();
     }
-    else
+    else if (UPstream::is_subrank(comm))
     {
-        PstreamBuffers pBufs(comm, UPstream::commsTypes::nonBlocking);
+        List<char>& procSlice = localData;
 
-        if (UPstream::master(comm))
-        {
-            // Master data already read ...
-            auto& is = *isPtr;
-            is.fatalCheck(FUNCTION_NAME);
+        // Probe the incoming message source/size
+        std::pair<int, int> probed =
+            UPstream::probeMessage
+            (
+                UPstream::commsTypes::blocking,
+                UPstream::masterNo(),
+                UPstream::msgType(),
+                comm
+            );
 
-            // Read and transmit slave data
-            for (const int proci : UPstream::subProcs(comm))
-            {
-                List<char> elems;
-                decomposedBlockData::readBlockEntry(is, elems);
+        procSlice.resize_nocopy(probed.second);
 
-                UOPstream os(proci, pBufs);
-                os << elems;
-            }
-
-            ok = is.good();
-        }
-
-        pBufs.finishedScatters();
-
-        if (!UPstream::master(comm))
-        {
-            UIPstream is(UPstream::masterNo(), pBufs);
-            is >> data;
-
-            realIsPtr.reset(new ICharStream(std::move(data)));
-            realIsPtr->name() = fName;
-        }
+        // Receive content (can also be zero-sized)
+        UIPstream::read
+        (
+            UPstream::commsTypes::nonBlocking,
+            UPstream::masterNo(),
+            procSlice.data(),
+            procSlice.size_bytes(),
+            UPstream::msgType(),
+            comm
+        );
     }
 
-    Pstream::broadcast(ok, comm);
+    UPstream::waitRequests(startOfRequests);
+    procData.clear();
+
+    if (UPstream::is_subrank(comm))
+    {
+        // Move block data into a stream
+        realIsPtr.reset(new ICharStream(std::move(localData)));
+        realIsPtr->name() = fName;
+    }
+
+    // Sync information
+
+    // // Not needed...
+    // Pstream::broadcast(ok, comm);
 
     // Broadcast master header info,
     // set stream properties from realIsPtr on master
@@ -691,15 +651,16 @@ Foam::autoPtr<Foam::ISstream> Foam::decomposedBlockData::readBlocks
 
     if (UPstream::master(comm))
     {
-        verValue = realIsPtr().version().canonical();
-        fmtValue = static_cast<int>(realIsPtr().format());
-        labelWidth = realIsPtr().labelByteSize();
-        scalarWidth = realIsPtr().scalarByteSize();
+        auto& is = realIsPtr();
+        verValue = is.version().canonical();
+        fmtValue = static_cast<int>(is.format());
+        labelWidth = is.labelByteSize();
+        scalarWidth = is.scalarByteSize();
     }
 
     Pstream::broadcasts
     (
-        UPstream::worldComm,   // Future? comm,
+        comm,
         verValue,
         fmtValue,
         labelWidth,
@@ -711,83 +672,53 @@ Foam::autoPtr<Foam::ISstream> Foam::decomposedBlockData::readBlocks
         // Unneeded: headerIO.local()
     );
 
-    realIsPtr().version(IOstreamOption::versionNumber::canonical(verValue));
-    realIsPtr().format(IOstreamOption::streamFormat(fmtValue));
-    realIsPtr().setLabelByteSize(labelWidth);
-    realIsPtr().setScalarByteSize(scalarWidth);
+    if (realIsPtr)
+    {
+        auto& is = realIsPtr();
+        is.version(IOstreamOption::versionNumber::canonical(verValue));
+        is.format(IOstreamOption::streamFormat(fmtValue));
+        is.setLabelByteSize(labelWidth);
+        is.setScalarByteSize(scalarWidth);
+    }
 
     headerIO.rename(headerName);
+
+    if (debug)
+    {
+        Info<< "reading ok:" << ok << endl;
+    }
 
     return realIsPtr;
 }
 
 
-void Foam::decomposedBlockData::gather
+void Foam::decomposedBlockData::gatherProcData
 (
     const label comm,
-    const label data,
-    labelList& datas
-)
-{
-    const label nProcs = UPstream::nProcs(comm);
-    datas.resize(nProcs);
-
-    char* data0Ptr = datas.data_bytes();
-
-    List<int> recvOffsets;
-    List<int> recvSizes;
-    if (UPstream::master(comm))
-    {
-        recvOffsets.setSize(nProcs);
-        forAll(recvOffsets, proci)
-        {
-            // Note: truncating long int to int since UPstream::gather limited
-            // to ints
-            recvOffsets[proci] =
-                int(reinterpret_cast<char*>(&datas[proci]) - data0Ptr);
-        }
-        recvSizes.setSize(nProcs, sizeof(label));
-    }
-
-    UPstream::gather
-    (
-        reinterpret_cast<const char*>(&data),
-        sizeof(label),
-        data0Ptr,
-        recvSizes,
-        recvOffsets,
-        comm
-    );
-}
-
-
-void Foam::decomposedBlockData::gatherSlaveData
-(
-    const label comm,
-    const UList<char>& data,
+    const UList<char>& localData,
     const labelUList& recvSizes,
 
     const labelRange& fromProcs,
 
     List<int>& sliceOffsets,
-    DynamicList<char>& recvData
+    DynamicList<char>& recvData,
+    const UPstream::commsTypes commsType
 )
 {
-    const label myProci = UPstream::myProcNo(comm);
-    const label numProcs = UPstream::nProcs(comm);
+    const label myRank = UPstream::myProcNo(comm);
+    const label nProcs = UPstream::nProcs(comm);
 
     int nSendBytes = 0;
     recvData.clear();
 
-    // Calculate master data
+    // On master, calculate sizing/offsets and resize the recv buffer
     List<int> sliceSizes;
     if (UPstream::master(comm))
     {
-        sliceSizes.resize(numProcs, 0);
-        sliceOffsets.resize(numProcs+1, 0);
-
-        // Offset 1 beyond the end of the range
-        const label endProci = fromProcs.end_value();
+        sliceSizes.resize_nocopy(nProcs);
+        sliceSizes = 0;
+        sliceOffsets.resize_nocopy(nProcs+1);
+        sliceOffsets = 0;
 
         int totalSize = 0;
         for (const label proci : fromProcs)
@@ -797,55 +728,90 @@ void Foam::decomposedBlockData::gatherSlaveData
             totalSize += sliceSizes[proci];
         }
 
+        // One beyond the end of the range
+        const label endProci = fromProcs.end_value();
+
         sliceOffsets[endProci] = totalSize;
-        recvData.resize(totalSize);
+        recvData.resize_nocopy(totalSize);
     }
-    else if (fromProcs.contains(myProci))
+    else if (fromProcs.contains(myRank) && !localData.empty())
     {
         // Note: UPstream::gather limited to int
-        nSendBytes = int(data.size_bytes());
+        nSendBytes = int(localData.size_bytes());
     }
 
-    UPstream::gather
-    (
-        data.cdata(),
-        nSendBytes,
 
-        recvData.data(),
-        sliceSizes,
-        sliceOffsets,
-        comm
-    );
-}
-
-
-Foam::label Foam::decomposedBlockData::calcNumProcs
-(
-    const label comm,
-    const off_t maxBufferSize,
-    const labelUList& recvSizes,
-    const label startProci
-)
-{
-    const label nProcs = UPstream::nProcs(comm);
-
-    label nSendProcs = 0;
-    if (UPstream::master(comm))
+    if (UPstream::commsTypes::nonBlocking == commsType)
     {
-        off_t totalSize = recvSizes[startProci];
-        label proci = startProci+1;
-        while (proci < nProcs && (totalSize+recvSizes[proci] < maxBufferSize))
+        if (UPstream::master(comm))
         {
-            totalSize += recvSizes[proci];
-            proci++;
+            for (const label proci : fromProcs)
+            {
+                SubList<char> procSlice
+                (
+                    recvData,
+                    sliceOffsets[proci+1]-sliceOffsets[proci],
+                    sliceOffsets[proci]
+                );
+
+                if (procSlice.empty())
+                {
+                    continue;
+                }
+                else if (proci == UPstream::masterNo())
+                {
+                    // No self-communication, although masterNo is usually
+                    // not in the fromProcs list anyhow.
+                    std::copy
+                    (
+                        localData.cbegin(),
+                        localData.cbegin(procSlice.size()),
+                        procSlice.begin()
+                    );
+                }
+                else
+                {
+                    // Receive non-zero content
+                    UIPstream::read
+                    (
+                        UPstream::commsTypes::nonBlocking,
+                        proci,
+                        procSlice.data(),
+                        procSlice.size_bytes(),
+                        UPstream::msgType(),
+                        comm
+                    );
+                }
+            }
         }
-
-        nSendProcs = proci-startProci;
+        else if (fromProcs.contains(myRank) && !localData.empty())
+        {
+            // Send non-zero content
+            UOPstream::write
+            (
+                UPstream::commsTypes::nonBlocking,
+                UPstream::masterNo(),
+                localData.cdata(),
+                localData.size_bytes(),
+                UPstream::msgType(),
+                comm
+            );
+        }
     }
+    else
+    {
+        // This is MPI_Gatherv()
+        UPstream::gather
+        (
+            localData.cdata(),
+            nSendBytes,
 
-    Pstream::broadcast(nSendProcs, comm);
-
-    return nSendProcs;
+            recvData.data(),
+            sliceSizes,
+            sliceOffsets,
+            comm
+        );
+    }
 }
 
 
@@ -854,10 +820,10 @@ bool Foam::decomposedBlockData::writeBlocks
     const label comm,
     autoPtr<OSstream>& osPtr,
     List<std::streamoff>& blockOffset,
-    const UList<char>& masterData,
+    const UList<char>& localData,
 
     const labelUList& recvSizes,
-    const UPtrList<SubList<char>>& slaveData,
+    const UList<stdFoam::span<char>>& procData,
 
     const UPstream::commsTypes commsType,
     const bool syncReturnState
@@ -867,9 +833,9 @@ bool Foam::decomposedBlockData::writeBlocks
     {
         Pout<< "decomposedBlockData::writeBlocks:"
             << " stream:" << (osPtr ? osPtr->name() : "none")
-            << " data:" << masterData.size()
-            << " (master only) slaveData:" << slaveData.size()
-            << " commsType:" << Pstream::commsTypeNames[commsType] << endl;
+            << " data:" << localData.size()
+            << " (master only) procData:" << procData.size()
+            << " commsType:" << UPstream::commsTypeNames[commsType] << endl;
     }
 
     const label nProcs = UPstream::nProcs(comm);
@@ -879,44 +845,53 @@ bool Foam::decomposedBlockData::writeBlocks
     // Write master data
     if (UPstream::master(comm))
     {
-        blockOffset.resize(nProcs);
+        if (notNull(blockOffset))
+        {
+            // Recovery of blockOffset is optional
+            blockOffset.resize(nProcs);
+        }
 
         OSstream& os = osPtr();
 
-        blockOffset[UPstream::masterNo()] =
+        std::streamoff currOffset =
             decomposedBlockData::writeBlockEntry
             (
                 os,
                 UPstream::masterNo(),
-                masterData
+                localData
             );
 
-        ok = os.good();
-    }
-
-    if (slaveData.size())
-    {
-        // Already have gathered the slave data.
-
-        if (UPstream::master(comm))
+        if (UPstream::masterNo() < blockOffset.size())
         {
-            // Master data already written ...
-            OSstream& os = osPtr();
+            blockOffset[UPstream::masterNo()] = currOffset;
+        }
 
-            // Write slaves
+        // Write all pre-gathered proc data.
+        if (procData.size())
+        {
             for (label proci = 1; proci < nProcs; ++proci)
             {
-                blockOffset[proci] =
+                std::streamoff currOffset =
                     decomposedBlockData::writeBlockEntry
                     (
                         os,
                         proci,
-                        slaveData[proci]
+                        procData[proci]
                     );
-            }
 
-            ok = os.good();
+                if (proci < blockOffset.size())
+                {
+                    blockOffset[proci] = currOffset;
+                }
+            }
         }
+
+        ok = os.good();
+    }
+
+    if (!procData.empty())
+    {
+        // Had pre-gathered proc data
     }
     else if (commsType == UPstream::commsTypes::scheduled)
     {
@@ -925,46 +900,55 @@ bool Foam::decomposedBlockData::writeBlocks
             // Master data already written ...
             OSstream& os = osPtr();
 
-            // Receive and write slaves
+            // Receive and write proc data
             label maxNonLocalSize = 0;
             for (label proci = 1; proci < nProcs; ++proci)
             {
                 maxNonLocalSize = max(maxNonLocalSize, recvSizes[proci]);
             }
 
-            DynamicList<char> elems(maxNonLocalSize);
+            DynamicList<char> recvData(maxNonLocalSize);
             for (label proci = 1; proci < nProcs; ++proci)
             {
-                elems.resize_nocopy(recvSizes[proci]);
-                UIPstream::read
-                (
-                    UPstream::commsTypes::scheduled,
-                    proci,
-                    elems.data(),
-                    elems.size_bytes(),
-                    UPstream::msgType(),
-                    comm
-                );
+                recvData.resize_nocopy(recvSizes[proci]);
 
-                blockOffset[proci] =
+                if (!recvData.empty())
+                {
+                    UIPstream::read
+                    (
+                        UPstream::commsTypes::scheduled,
+                        proci,
+                        recvData.data(),
+                        recvData.size_bytes(),
+                        UPstream::msgType(),
+                        comm
+                    );
+                }
+
+                std::streamoff currOffset =
                     decomposedBlockData::writeBlockEntry
                     (
                         os,
                         proci,
-                        elems
+                        recvData
                     );
+
+                if (proci < blockOffset.size())
+                {
+                    blockOffset[proci] = currOffset;
+                }
             }
 
             ok = os.good();
         }
-        else
+        else if (UPstream::is_subrank(comm) && !localData.empty())
         {
             UOPstream::write
             (
                 UPstream::commsTypes::scheduled,
                 UPstream::masterNo(),
-                masterData.cdata(),
-                masterData.size_bytes(),
+                localData.cdata(),
+                localData.size_bytes(),
                 UPstream::msgType(),
                 comm
             );
@@ -974,76 +958,123 @@ bool Foam::decomposedBlockData::writeBlocks
     {
         // Master data already written ...
 
-        // Find out how many processor can be received into
+        // Find out how many ranks can be received into
         // maxMasterFileBufferSize
 
-        // Starting slave processor and number of processors
-        label startProc = 1;
-        label nSendProcs = nProcs-1;
+        const off_t maxBufferSize
+        (
+            fileOperations::masterUncollatedFileOperation::
+            maxMasterFileBufferSize
+        );
 
+        List<int> sliceOffsets;
         DynamicList<char> recvData;
 
-        while (nSendProcs > 0 && startProc < nProcs)
+        for
+        (
+            labelRange fromProcs(1, nProcs-1);
+            (fromProcs.start() < nProcs && fromProcs.size() > 0);
+            (fromProcs.start() += fromProcs.size())
+        )
         {
-            nSendProcs = calcNumProcs
-            (
-                comm,
-                off_t
-                (
-                    fileOperations::masterUncollatedFileOperation::
-                    maxMasterFileBufferSize
-                ),
-                recvSizes,
-                startProc
-            );
-
-            if (nSendProcs == 0)
             {
-                break;
+                label endProci = fromProcs.start();
+
+                if (UPstream::master(comm))
+                {
+                    // Send at least one proc, even if that if it is larger
+                    // than maxBufferSize.
+                    // Also handles the corner case the first proci has size 0,
+                    // but the next one is too large.
+
+                    endProci = fromProcs.start()+1;  // At least one proc
+
+                    for
+                    (
+                        off_t total = recvSizes[fromProcs.start()];
+                        (
+                            endProci < nProcs
+                         &&
+                            (
+                                !total
+                             || (total + recvSizes[endProci] < maxBufferSize)
+                            )
+                        );
+                        ++endProci
+                    )
+                    {
+                        total += recvSizes[endProci];
+                    }
+                }
+
+                Pstream::broadcast(endProci, comm);
+                fromProcs.size() = (endProci - fromProcs.start());
             }
 
+            const label startOfRequests = UPstream::nRequests();
 
-            // Gather data from (a slice of) the slaves
-            labelRange fromProcs(startProc, nSendProcs);
-
-            List<int> sliceOffsets;
-            gatherSlaveData
+            // Setup non-blocking send/recv or MPI_Gatherv
+            gatherProcData
             (
                 comm,
-                masterData,
+                localData,
                 recvSizes,
 
                 fromProcs,
 
                 sliceOffsets,
-                recvData
+                recvData,
+                commsType  // ie, blocking or non-blocking
             );
+
+            // For sanity checks
+            // const label endOfRequests = UPstream::nRequests();
 
             if (UPstream::master(comm))
             {
                 OSstream& os = osPtr();
 
                 // Write received data
+                label currRequest = startOfRequests;
                 for (const label proci : fromProcs)
                 {
-                    SubList<char> dataSlice
+                    SubList<char> procSlice
                     (
                         recvData,
                         sliceOffsets[proci+1]-sliceOffsets[proci],
                         sliceOffsets[proci]
                     );
 
-                    blockOffset[proci] =
+                    if
+                    (
+                        (UPstream::commsTypes::nonBlocking == commsType)
+                     && (proci != UPstream::masterNo())
+                     && !procSlice.empty()
+                    )
+                    {
+                        UPstream::waitRequest(currRequest);
+                        ++currRequest;
+                    }
+
+                    std::streamoff currOffset =
                         decomposedBlockData::writeBlockEntry
                         (
                             os,
                             proci,
-                            dataSlice
+                            procSlice
                         );
+
+                    if (proci < blockOffset.size())
+                    {
+                        blockOffset[proci] = currOffset;
+                    }
                 }
             }
 
-            startProc += nSendProcs;
+            if (UPstream::commsTypes::nonBlocking == commsType)
+            {
+                UPstream::waitRequests(startOfRequests);
+            }
         }
 
         if (UPstream::master(comm))
@@ -1054,8 +1085,9 @@ bool Foam::decomposedBlockData::writeBlocks
 
     if (syncReturnState)
     {
-        //- Enable to get synchronised error checking. Is the one that keeps
-        //  slaves as slow as the master (which does all the writing)
+        //- Enable to get synchronised error checking.
+        //  Ensures that all procs are as slow as the master
+        //  (which does all the writing)
         Pstream::broadcast(ok, comm);
     }
 
@@ -1088,7 +1120,7 @@ bool Foam::decomposedBlockData::writeData(Ostream& os) const
     fileName masterLocation(instance()/db().dbDir()/local());
 
     // Re-read my own data to find out the header information
-    if (Pstream::master(comm_))
+    if (UPstream::master(comm_))
     {
         ISpanStream headerStream(contentData_);
         io.readHeader(headerStream);
@@ -1114,7 +1146,7 @@ bool Foam::decomposedBlockData::writeData(Ostream& os) const
     streamOpt.version(IOstreamOption::versionNumber::canonical(verValue));
     streamOpt.format(IOstreamOption::streamFormat(fmtValue));
 
-    if (!Pstream::master(comm_))
+    if (UPstream::is_subrank(comm_))
     {
         decomposedBlockData::writeHeader
         (
@@ -1178,11 +1210,12 @@ bool Foam::decomposedBlockData::writeObject
         );
     }
 
-    labelList recvSizes;
-    gather(comm_, label(contentData_.size_bytes()), recvSizes);
+    const labelList recvSizes
+    (
+        UPstream::listGatherValues<label>(contentData_.size(), comm_)
+    );
 
-    List<std::streamoff> blockOffsets;
-    PtrList<SubList<char>> slaveData;  // dummy slave data
+    List<std::streamoff> blockOffsets;  // Optional
     return writeBlocks
     (
         comm_,
@@ -1190,7 +1223,7 @@ bool Foam::decomposedBlockData::writeObject
         blockOffsets,
         contentData_,
         recvSizes,
-        slaveData,
+        UList<stdFoam::span<char>>(),  // dummy proc data (nothing pre-gathered)
         commsType_
     );
 }
