@@ -37,12 +37,28 @@ Description
 
 using namespace Foam;
 
-Ostream& writeList(Ostream& os, const UList<char>& list)
+Ostream& printString(Ostream& os, const char* first, const char* last)
+{
+    os << '"';
+    for (; first != last; (void)++first)
+    {
+        os << *first;
+    }
+    os << '"';
+
+    return os;
+}
+
+
+Ostream& printView(Ostream& os, const char* first, const char* last)
 {
     char buf[4];
-    os << list.size() << '(';
-    for (const char c : list)
+    os << label(last-first) << '(';
+
+    for (; first != last; (void)++first)
     {
+        const char c = *first;
+
         if (isprint(c))
         {
             os << c;
@@ -67,16 +83,35 @@ Ostream& writeList(Ostream& os, const UList<char>& list)
 }
 
 
+Ostream& printView
+(
+    Ostream& os,
+    #if __cplusplus >= 201703L
+    std::string_view s
+    #else
+    stdFoam::span<char> s
+    #endif
+)
+{
+    return printView(os, s.begin(), s.end());
+}
+
+
+Ostream& printView(Ostream& os, const UList<char>& list)
+{
+    return printView(os, list.begin(), list.end());
+}
+
+
+Ostream& writeList(Ostream& os, const UList<char>& list)
+{
+    return printView(os, list);
+}
+
+
 Ostream& toString(Ostream& os, const UList<char>& list)
 {
-    os << '"';
-    for (const char c : list)
-    {
-        os << c;
-    }
-    os << '"';
-
-    return os;
+    return printString(os, list.begin(), list.end());
 }
 
 
@@ -152,11 +187,6 @@ int main(int argc, char *argv[])
 
     printInfo(obuf);
 
-    obuf.shrink();
-
-    Info<< "after shrink" << nl;
-    printInfo(obuf);
-
     // Add some more
     for (label i=10; i < 15; ++i)
     {
@@ -175,13 +205,16 @@ int main(int argc, char *argv[])
 
     Info<< "transfer contents to a List or ICharStream" << nl;
 
-    ICharStream ibuf;
     // Reclaim data storage from OCharStream -> ICharStream
-    {
-        List<char> data;
-        obuf.swap(data);
-        ibuf.swap(data);
-    }
+    ICharStream ibuf(std::move(obuf));
+
+    // OLD
+    // ICharStream ibuf;
+    // {
+    //     List<char> data;
+    //     obuf.swap(data);
+    //     ibuf.swap(data);
+    // }
 
     Info<<"original:";
     printInfo(obuf);

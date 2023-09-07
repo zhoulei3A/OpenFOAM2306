@@ -64,9 +64,9 @@ See Also
 #ifndef Foam_ISpanStream_H
 #define Foam_ISpanStream_H
 
+#include "memoryStreamBuffer.H"
 #include "UList.H"
 #include "ISstream.H"
-#include "memoryStreamBuffer.H"
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
@@ -149,7 +149,17 @@ public:
         //- Span of the input characters (is modifiable!)
         UList<char> list() const
         {
-            return buffer_type::span_list();
+            return UList<char>
+            (
+                buffer_type::data_bytes(),
+                label(buffer_type::size_bytes())
+            );
+        }
+
+        //- A string_view (c++17) or span view (older c++) of buffer contents
+        auto view() const -> decltype(buffer_type::view())
+        {
+            return buffer_type::view();
         }
 
         //- Rewind the stream, clearing any old errors
@@ -300,9 +310,14 @@ public:
         //- Same as (capacity() - input_pos())
         std::streamsize remaining() const { return stream_.remaining(); }
 
-
         //- Span of the current input characters (is modifiable!)
         UList<char> list() const { return stream_.list(); }
+
+        //- A string_view (c++17) or span view (older c++) of buffer contents
+        auto view() const -> decltype(stream_.view())
+        {
+            return stream_.view();
+        }
 
         //- Reset input area, position to buffer start and clear errors
         void reset(const char* buffer, size_t nbytes)

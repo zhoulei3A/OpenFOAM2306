@@ -157,7 +157,17 @@ public:
         //- Span of the current output characters (is modifiable!)
         UList<char> list() const
         {
-            return buffer_type::span_list();
+            return UList<char>
+            (
+                buffer_type::data_bytes(),
+                label(buffer_type::size_bytes())
+            );
+        }
+
+        //- A string_view (c++17) or span view (older c++) of buffer contents
+        auto view() const -> decltype(buffer_type::view())
+        {
+            return buffer_type::view();
         }
 
         //- Rewind the stream, clearing any old errors
@@ -222,7 +232,6 @@ protected:
                          Class OSpanStream Declaration
 \*---------------------------------------------------------------------------*/
 
-//- An OSstream attached to an unallocated external buffer
 class OSpanStream
 :
     public Detail::OSpanStreamAllocator,
@@ -320,6 +329,12 @@ public:
 
         //- Span of the current output characters (is modifiable!)
         UList<char> list() const { return stream_.list(); }
+
+        //- A string_view (c++17) or span view (older c++) of buffer contents
+        auto view() const -> decltype(stream_.view())
+        {
+            return stream_.view();
+        }
 
         //- Reset the put area
         void reset(char* buffer, size_t nbytes)

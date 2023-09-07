@@ -39,7 +39,6 @@ Description
 #include "UList.H"
 
 #include <memory>
-#include <sstream>    // Possibly want stringstream too...
 #include <type_traits>
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
@@ -208,17 +207,23 @@ public:
             return (gptr() < egptr()) ? (egptr() - gptr()) : 0;
         }
 
-        //- Span of the input characters (is modifiable!)
-        UList<char> span_list() const
-        {
-            return UList<char>(eback(), (egptr() - eback()));
-        }
+        //- The span data (start of input characters)
+        char* data_bytes() const { return eback(); }
 
-        // //- The span of input characters (is modifiable!)
-        // stdFoam::span<char> span() const
-        // {
-        //     return stdFoam::span<char>(eback(), (egptr() - eback()));
-        // }
+        //- The span size (number of input characters)
+        std::streamsize size_bytes() const { return (egptr() - eback()); }
+
+        #if __cplusplus >= 201703L
+        std::string_view view() const
+        {
+            return std::string_view(data_bytes(), size_bytes());
+        }
+        #else
+        stdFoam::span<char> view() const
+        {
+            return stdFoam::span<char>(data_bytes(), size_bytes());
+        }
+        #endif
 
         //- Some information about the input buffer position/capacity
         void info(Ostream& os) const
@@ -387,17 +392,23 @@ public:
         //- The put buffer capacity
         std::streamsize span_capacity() const { return (epptr() - pbase()); }
 
-        //- Span of the output characters (is modifiable!)
-        UList<char> span_list() const
-        {
-            return UList<char>(pbase(), (pptr() - pbase()));
-        }
+        //- The span data (start of output characters)
+        char* data_bytes() const { return pbase(); }
 
-        //- The span of output characters (is modifiable!)
-        // stdFoam::span<char> span() const
-        // {
-        //     return stdFoam::span<char>(pbase(), (pptr() - pbase()));
-        // }
+        //- The span size (size of output buffer)
+        std::streamsize size_bytes() const { return (pptr() - pbase()); }
+
+        #if __cplusplus >= 201703L
+        std::string_view view() const
+        {
+            return std::string_view(data_bytes(), size_bytes());
+        }
+        #else
+        stdFoam::span<char> view() const
+        {
+            return stdFoam::span<char>(data_bytes(), size_bytes());
+        }
+        #endif
 
         //- Some information about the output buffer position/capacity
         void info(Ostream& os) const

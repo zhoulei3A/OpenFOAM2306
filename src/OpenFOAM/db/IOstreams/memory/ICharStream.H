@@ -53,6 +53,7 @@ namespace Foam
 // Forward Declarations
 class icharstream;
 class ICharStream;
+class OCharStream;
 
 // Older names (prior to 2023-08)
 typedef ICharStream IListStream;
@@ -92,6 +93,14 @@ public:
         {
             reset(buffer, nbytes);
         }
+
+        // //- Construct (deep copy) from string_view content
+        // explicit icharstream(std::string_view s)
+        // :
+        //     icharstream()
+        // {
+        //     reset(buffer, nbytes);
+        // }
 
         // //- Construct (deep copy) from span character content
         // explicit icharstream(stdFoam::span<char> s)
@@ -143,7 +152,17 @@ public:
         //- Span of the input characters (is modifiable!)
         UList<char> list() const
         {
-            return buffer_type::span_list();
+            return UList<char>
+            (
+                buffer_type::data_bytes(),
+                label(buffer_type::size_bytes())
+            );
+        }
+
+        //- A string_view (c++17) or span view (older c++) of buffer contents
+        auto view() const -> decltype(buffer_type::view())
+        {
+            return buffer_type::view();
         }
 
         //- Rewind the stream, clearing any old errors
@@ -153,21 +172,21 @@ public:
             stream_type::clear();  // Clear old errors
         }
 
-        //- Reset content (copy)
+        //- Reset stream content (copy), reset positions
         void reset(const char* buffer, size_t nbytes)
         {
             buffer_type::reset(buffer, nbytes);
             stream_type::clear();  // Clear old errors
         }
 
-        //- Transfer list contents to List buffer
+        //- Exchange stream content and parameter contents, reset positions
         void swap(List<char>& other)
         {
             buffer_type::swap(other);
             stream_type::clear();  // Clear old errors
         }
 
-        //- Transfer list contents to a DynamicList buffer
+        //- Exchange stream content and parameter contents, reset positions
         template<int SizeMin>
         void swap(DynamicList<char,SizeMin>& other)
         {
@@ -274,6 +293,13 @@ public:
             stream_.swap(buffer);
         }
 
+        //- Move construct from OCharStream content
+        explicit ICharStream
+        (
+            OCharStream&& content,
+            IOstreamOption streamOpt = IOstreamOption()
+        );
+
 
     // Member Functions
 
@@ -296,6 +322,12 @@ public:
         //- Span of the input characters (is modifiable!)
         UList<char> list() const { return stream_.list(); }
 
+        //- A string_view (c++17) or span view (older c++) of buffer contents
+        auto view() const -> decltype(stream_.view())
+        {
+            return stream_.view();
+        }
+
         //- Rewind the stream, clearing any old errors
         virtual void rewind()
         {
@@ -310,20 +342,23 @@ public:
             syncState();
         }
 
-        //- Transfer list contents to List buffer
+        //- Exchange stream content and parameter contents, reset positions
         void swap(List<char>& other)
         {
             stream_.swap(other);
             syncState();
         }
 
-        //- Transfer list contents to a DynamicList buffer
+        //- Exchange stream content and parameter contents, reset positions
         template<int SizeMin>
         void swap(DynamicList<char,SizeMin>& other)
         {
             stream_.swap(other);
             syncState();
         }
+
+        //- Exchange stream content and parameter contents, reset positions
+        void swap(OCharStream& other);
 
         //- Print stream description to Ostream
         virtual void print(Ostream& os) const;

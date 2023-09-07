@@ -71,4 +71,30 @@ void Foam::OCountStream::print(Ostream& os) const
 }
 
 
+// * * * * * * * * * * * * * * * * Constructors  * * * * * * * * * * * * * * //
+
+Foam::ICharStream::ICharStream
+(
+    OCharStream&& content,
+    IOstreamOption streamOpt
+)
+:
+    ICharStream(streamOpt)
+{
+    swap(content);
+}
+
+
+// * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
+
+void Foam::ICharStream::swap(OCharStream& other)
+{
+    List<char> buf;
+
+    other.swap(buf);  // Recover output content (incl shrink)
+    this->swap(buf);  // Replace input content
+    other.swap(buf);  // Replace output buffer space (probably not required)
+}
+
+
 // ************************************************************************* //
