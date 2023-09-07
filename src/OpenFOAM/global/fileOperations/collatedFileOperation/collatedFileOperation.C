@@ -36,6 +36,7 @@ License
 #include "masterOFstream.H"
 #include "OFstream.H"
 #include "foamVersion.H"
+#include <limits>
 
 /* * * * * * * * * * * * * * * Static Member Data  * * * * * * * * * * * * * */
 
@@ -57,15 +58,17 @@ namespace fileOperations
         comm
     );
 
-    float collatedFileOperation::maxThreadFileBufferSize
+    label collatedFileOperation::maxThreadFileBufferSize(labelMin);
+
+    float collatedFileOperation::maxThreadFileBufferSize_
     (
-        debug::floatOptimisationSwitch("maxThreadFileBufferSize", 1e9)
+        debug::floatOptimisationSwitch("maxThreadFileBufferSize", 0)
     );
     registerOptSwitch
     (
         "maxThreadFileBufferSize",
         float,
-        collatedFileOperation::maxThreadFileBufferSize
+        collatedFileOperation::maxThreadFileBufferSize_
     );
 
     // Threaded MPI: depending on buffering
@@ -80,6 +83,46 @@ namespace fileOperations
 }
 
 
+// * * * * * * * * * * * * * Private Member Functions  * * * * * * * * * * * //
+
+Foam::label
+Foam::fileOperations::collatedFileOperation::getMaxBufferSize()
+{
+    if (maxThreadFileBufferSize == labelMin)  // Not previously checked
+    {
+        bool error = false;
+
+        const float maxValue =
+            static_cast<float>(std::numeric_limits<int>::max());
+
+        if (maxThreadFileBufferSize_ > maxValue)
+        {
+            error = true;
+            maxThreadFileBufferSize = std::numeric_limits<int>::max();
+        }
+        else if (maxThreadFileBufferSize_ <= -maxValue)
+        {
+            error = true;
+            maxThreadFileBufferSize = -std::numeric_limits<int>::max();
+        }
+        else
+        {
+            maxThreadFileBufferSize =
+                static_cast<int>(maxThreadFileBufferSize_);
+        }
+
+        if (error)
+        {
+            WarningInFunction
+                << "maxThreadFileBufferSize exceeds max value for an int: "
+                << std::numeric_limits<int>::max() << " - restricting" << nl;
+        }
+    }
+
+    return mag(maxThreadFileBufferSize);
+}
+
+
 // * * * * * * * * * * * * Protected Member Functions  * * * * * * * * * * * //
 
 void Foam::fileOperations::collatedFileOperation::printBanner
@@ -87,6 +130,8 @@ void Foam::fileOperations::collatedFileOperation::printBanner
     const bool withRanks
 ) const
 {
+    (void) getMaxBufferSize();
+
     DetailInfo
         << "I/O    : " << this->type();
 
@@ -94,7 +139,7 @@ void Foam::fileOperations::collatedFileOperation::printBanner
     {
         DetailInfo
             << " [unthreaded] (maxThreadFileBufferSize = 0)." << nl
-            << "         Writing may be slow for large file sizes."
+            << "         Writing may be slower for large file sizes."
             << endl;
     }
     else
@@ -103,11 +148,9 @@ void Foam::fileOperations::collatedFileOperation::printBanner
             << " [threaded] (maxThreadFileBufferSize = "
             << maxThreadFileBufferSize << ")." << nl
             << "         Requires buffer large enough to collect all data"
-               " or thread support" << nl
-            << "         enabled in MPI. If MPI thread support cannot be"
-               " enabled, deactivate" << nl
-            << "         threading by setting maxThreadFileBufferSize"
-               " to 0 in" << nl
+               " or MPI thread support." << nl
+            << "         To avoid MPI threading, set"
+               " (maxThreadFileBufferSize = 0) in" << nl
             << "         OpenFOAM etc/controlDict" << endl;
     }
 
@@ -274,6 +317,8 @@ static Tuple2<label, labelList> getCommPattern()
 
 void Foam::fileOperations::collatedFileOperation::init(bool verbose)
 {
+    (void) getMaxBufferSize();
+
     verbose = (verbose && Foam::infoDetailLevel > 0);
 
     if (verbose)
@@ -295,7 +340,7 @@ Foam::fileOperations::collatedFileOperation::collatedFileOperation
         false   // verbose
     ),
     managedComm_(getManagedComm(comm_)),  // Possibly locally allocated
-    writer_(mag(maxThreadFileBufferSize), comm_)
+    writer_(getMaxBufferSize(), comm_)
 {
     init(verbose);
 }
@@ -315,7 +360,7 @@ Foam::fileOperations::collatedFileOperation::collatedFileOperation
         false   // verbose
     ),
     managedComm_(-1),  // Externally managed
-    writer_(mag(maxThreadFileBufferSize), comm_)
+    writer_(getMaxBufferSize(), comm_)
 {
     init(verbose);
 }

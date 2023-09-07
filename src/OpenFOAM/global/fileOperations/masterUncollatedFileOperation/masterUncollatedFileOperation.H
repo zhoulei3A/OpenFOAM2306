@@ -94,6 +94,10 @@ class masterUncollatedFileOperation
 
     // Private Member Functions
 
+        //- Return absolute value of maxMasterFileBufferSize.
+        //- Warns about out-of-range (int) and clamps the value.
+        static label getMaxBufferSize();
+
         //- Any initialisation steps after constructing
         void init(bool verbose);
 
@@ -479,10 +483,13 @@ public:
 
     // Static Data
 
-        //- Max size of parallel communications. Switches from non-blocking
-        //  to scheduled when reading/writing files. Read as float to enable
-        //  easy specification of large sizes.
-        static float maxMasterFileBufferSize;
+        //- Max size of parallel communications.
+        //  Switches from non-blocking to scheduled when reading/writing files.
+        static label maxMasterFileBufferSize;
+
+        //- Input layer for maxThreadFileBufferSize.
+        //  Read as float to enable easy specification of large sizes.
+        static float maxMasterFileBufferSize_;
 
 
     // Constructors

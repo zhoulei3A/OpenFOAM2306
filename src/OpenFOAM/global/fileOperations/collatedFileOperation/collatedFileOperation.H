@@ -76,6 +76,10 @@ class collatedFileOperation
 
     // Private Member Functions
 
+        //- Return absolute value of maxThreadFileBufferSize.
+        //- Warns about out-of-range (int) and clamps the value.
+        static label getMaxBufferSize();
+
         //- Any initialisation steps after constructing
         void init(bool verbose);
 
@@ -112,8 +116,12 @@ public:
 
         //- Max size of thread buffer size. This is the overall size of
         //  all files to be written. Starts blocking if not enough size.
+        static label maxThreadFileBufferSize;
+
+        //- Input layer for maxThreadFileBufferSize.
         //  Read as float to enable easy specification of large sizes.
-        static float maxThreadFileBufferSize;
+        static float maxThreadFileBufferSize_;
+
 
 
     // Constructors

@@ -39,6 +39,7 @@ License
 #include "registerSwitch.H"
 #include "dummyISstream.H"
 #include "SubList.H"
+#include <limits>
 
 /* * * * * * * * * * * * * * * Static Member Data  * * * * * * * * * * * * * */
 
@@ -60,7 +61,9 @@ namespace fileOperations
         comm
     );
 
-    float masterUncollatedFileOperation::maxMasterFileBufferSize
+    label masterUncollatedFileOperation::maxMasterFileBufferSize(labelMin);
+
+    float masterUncollatedFileOperation::maxMasterFileBufferSize_
     (
         Foam::debug::floatOptimisationSwitch("maxMasterFileBufferSize", 1e9)
     );
@@ -68,7 +71,7 @@ namespace fileOperations
     (
         "maxMasterFileBufferSize",
         float,
-        masterUncollatedFileOperation::maxMasterFileBufferSize
+        masterUncollatedFileOperation::maxMasterFileBufferSize_
     );
 
     // Threaded MPI: not required
@@ -80,6 +83,48 @@ namespace fileOperations
         masterUncollated
     );
 }
+}
+
+
+// * * * * * * * * * * * * * Private Member Functions  * * * * * * * * * * * //
+
+Foam::label
+Foam::fileOperations::masterUncollatedFileOperation::getMaxBufferSize()
+{
+    if (maxMasterFileBufferSize == labelMin)  // Not previously checked
+    {
+        bool error = false;
+
+        const float maxValue =
+            static_cast<float>(std::numeric_limits<int>::max());
+
+        if (maxMasterFileBufferSize_ > maxValue)
+        {
+            error = true;
+            maxMasterFileBufferSize = maxValue;
+        }
+        else if (maxMasterFileBufferSize_ <= -maxValue)
+        {
+            error = true;
+            maxMasterFileBufferSize = -maxValue;
+        }
+        else
+        {
+            maxMasterFileBufferSize =
+                static_cast<int>(maxMasterFileBufferSize_);
+        }
+
+        // Currently no special meaning for negative values?
+
+        if (error)
+        {
+            WarningInFunction
+                << "maxMasterFileBufferSize exceeds max value for an int: "
+                << std::numeric_limits<int>::max() << " - restricting" << nl;
+        }
+    }
+
+    return mag(maxMasterFileBufferSize);
 }
 
 
@@ -754,6 +799,8 @@ static Tuple2<label, labelList> getCommPattern()
 
 void Foam::fileOperations::masterUncollatedFileOperation::init(bool verbose)
 {
+    (void) getMaxBufferSize();
+
     verbose = (verbose && Foam::infoDetailLevel > 0);
 
     if (verbose)
